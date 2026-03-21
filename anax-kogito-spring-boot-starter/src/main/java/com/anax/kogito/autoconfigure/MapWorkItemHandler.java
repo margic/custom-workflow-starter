@@ -1,8 +1,8 @@
 package com.anax.kogito.autoconfigure;
 
-import org.kie.kogito.internal.process.runtime.KogitoWorkItem;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemHandler;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemManager;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItem;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemHandler;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemManager;
 import org.kie.kogito.process.workitems.impl.DefaultKogitoWorkItemHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +63,6 @@ public class MapWorkItemHandler extends DefaultKogitoWorkItemHandler {
         this.applicationContext = applicationContext;
     }
 
-    @Override
     public void executeWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         String mappingName = (String) workItem.getParameter(PARAM_MAPPING_NAME);
 
@@ -119,7 +118,6 @@ public class MapWorkItemHandler extends DefaultKogitoWorkItemHandler {
         }
     }
 
-    @Override
     public void abortWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         // No-op: Mapping transformations are synchronous and cannot be aborted
         logger.debug("Abort requested for map work item: {}", workItem.getStringId());

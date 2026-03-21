@@ -1,8 +1,8 @@
 package com.anax.kogito.autoconfigure;
 
-import org.kie.kogito.internal.process.runtime.KogitoWorkItem;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemHandler;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemManager;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItem;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemHandler;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemManager;
 import org.kie.kogito.process.workitems.impl.DefaultKogitoWorkItemHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +57,6 @@ public class AnaxWorkItemHandler extends DefaultKogitoWorkItemHandler {
         this.applicationContext = applicationContext;
     }
 
-    @Override
     public void executeWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         String beanName = (String) workItem.getParameter(PARAM_BEAN_NAME);
         String methodName = (String) workItem.getParameter(PARAM_METHOD_NAME);
@@ -109,7 +108,6 @@ public class AnaxWorkItemHandler extends DefaultKogitoWorkItemHandler {
         }
     }
 
-    @Override
     public void abortWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         // No-op: Bean invocations are synchronous and cannot be aborted
         logger.debug("Abort requested for anax work item: {}", workItem.getStringId());

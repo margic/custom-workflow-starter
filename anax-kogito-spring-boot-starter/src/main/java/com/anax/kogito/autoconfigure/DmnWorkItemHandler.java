@@ -2,9 +2,10 @@ package com.anax.kogito.autoconfigure;
 
 import org.kie.kogito.decision.DecisionModel;
 import org.kie.kogito.decision.DecisionModels;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItem;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemHandler;
-import org.kie.kogito.internal.process.runtime.KogitoWorkItemManager;
+import org.kie.dmn.api.core.DMNResult;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItem;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemHandler;
+import org.kie.kogito.internal.process.workitem.KogitoWorkItemManager;
 import org.kie.kogito.process.workitems.impl.DefaultKogitoWorkItemHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +52,6 @@ public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
         this.decisionModels = decisionModels;
     }
 
-    @Override
     public void executeWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         String namespace = (String) workItem.getParameter(PARAM_NAMESPACE);
         String modelName = (String) workItem.getParameter(PARAM_MODEL_NAME);
@@ -59,11 +59,11 @@ public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
         logger.debug("Executing DMN decision: namespace={}, modelName={}", namespace, modelName);
 
         try {
-            // Lookup the DMN model by namespace
-            DecisionModel decisionModel = decisionModels.getDecisionModel(namespace);
+            // Lookup the DMN model by namespace and model name
+            DecisionModel decisionModel = decisionModels.getDecisionModel(namespace, modelName);
             if (decisionModel == null) {
                 throw new IllegalStateException(
-                        "DMN model not found: namespace=" + namespace);
+                        "DMN model not found: namespace=" + namespace + ", modelName=" + modelName);
             }
 
             // Build DMN input context from all workflow variables
@@ -78,8 +78,14 @@ public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
             logger.debug("DMN input context: {}", dmnContext);
 
             // Evaluate the DMN decision
-            Map<String, Object> result = decisionModel.evaluateAll(
+            DMNResult dmnResult = decisionModel.evaluateAll(
                     decisionModel.newContext(dmnContext));
+
+            // Extract decision results from DMNResult
+            Map<String, Object> result = new HashMap<>();
+            dmnResult.getDecisionResults().forEach(dr -> {
+                result.put(dr.getDecisionName(), dr.getResult());
+            });
 
             logger.debug("DMN decision result: {}", result);
 
@@ -94,7 +100,6 @@ public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
         }
     }
 
-    @Override
     public void abortWorkItem(KogitoWorkItem workItem, KogitoWorkItemManager manager) {
         // No-op: DMN evaluations are synchronous and cannot be aborted
         logger.debug("Abort requested for DMN work item: {}", workItem.getStringId());

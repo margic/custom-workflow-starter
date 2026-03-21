@@ -24,12 +24,29 @@
       }
     }
   },
-  "forwardPorts": [3001, 19092, 18081, 8080],
+  "forwardPorts": [
+    3001,
+    19092,
+    18081,
+    8080
+  ],
   "portsAttributes": {
-    "3001": { "label": "Metadata Platform", "onAutoForward": "silent" },
-    "19092": { "label": "Kafka (Redpanda)", "onAutoForward": "silent" },
-    "18081": { "label": "Schema Registry", "onAutoForward": "silent" },
-    "8080": { "label": "Redpanda Console", "onAutoForward": "silent" }
+    "3001": {
+      "label": "Metadata Platform",
+      "onAutoForward": "silent"
+    },
+    "19092": {
+      "label": "Kafka (Redpanda)",
+      "onAutoForward": "silent"
+    },
+    "18081": {
+      "label": "Schema Registry",
+      "onAutoForward": "silent"
+    },
+    "8080": {
+      "label": "Redpanda Console",
+      "onAutoForward": "silent"
+    }
   },
   "postCreateCommand": "java -version && bash -i -c 'sdk install gradle'"
 }

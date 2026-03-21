@@ -785,7 +785,8 @@ These must be handled by `ResolveGovernanceAssetsTask`:
 - **The metadata server client interface enables test doubles** — stub for unit tests, WireMock for integration tests
 - **No proprietary Kogito test artifact is required** — Kogito does **not** ship a generic work-item unit test harness. We follow the same pattern Kogito uses internally: mock `KogitoWorkItem`, `KogitoWorkItemManager`, and `KogitoWorkItemHandler` with Mockito, then call `activateWorkItemHandler()` directly
 - **Gradle TestKit (`GradleRunner`)** for plugin functional tests — these are inherently slower but critical
-- **No test requires network access** — metadata server interactions are stubbed or mocked at every level
+- **No unit/integration test requires network access** — metadata server interactions are stubbed or mocked at every level
+- **Dev container provides a real test platform** — Docker Compose runs the metadata platform (`margic/anax-metadata-platform:latest` on port 3001) and Redpanda (Kafka-compatible on port 19092) alongside the dev container, enabling live integration tests without external infrastructure
 
 ### 6.2 Assessment of Kogito Test Libraries
 
@@ -868,19 +869,23 @@ This handler is then registered with `ProcessTestHelper.registerHandler(app, "Hu
 ### 6.4 Test Pyramid by Module
 
 ```
-                    ┌───────────────────────┐
-                    │   E2E / Smoke Tests    │  ← anax-kogito-sample
-                    │   (full build + run)   │     bootRun + REST Assured
-                    ├───────────────────────┤
-                    │  Plugin Functional     │  ← anax-kogito-codegen-plugin
-                    │  (GradleRunner)        │     TestKit + WireMock
-                    ├───────────────────────┤
-                    │  Integration Tests     │  ← anax-kogito-spring-boot-starter
-                    │  (@SpringBootTest)     │     auto-config wiring validation
-                    ├───────────────────────┤
-                    │  Unit Tests            │  ← all modules
-                    │  (JUnit 5 + Mockito)   │     fast, no containers
-                    └───────────────────────┘
+              ┌─────────────────────────────────┐
+              │   E2E / Smoke Tests              │  ← anax-kogito-sample
+              │   (full build + run)             │     bootRun + REST Assured
+              ├─────────────────────────────────┤
+              │   Dev Container Integration      │  ← plugin + sample
+              │   (real metadata server + Kafka) │     margic/anax-metadata-platform
+              │                                  │     + Redpanda (Kafka API)
+              ├─────────────────────────────────┤
+              │   Plugin Functional              │  ← anax-kogito-codegen-plugin
+              │   (GradleRunner)                 │     TestKit + WireMock
+              ├─────────────────────────────────┤
+              │   Integration Tests              │  ← anax-kogito-spring-boot-starter
+              │   (@SpringBootTest)              │     auto-config wiring validation
+              ├─────────────────────────────────┤
+              │   Unit Tests                     │  ← all modules
+              │   (JUnit 5 + Mockito)            │     fast, no containers
+              └─────────────────────────────────┘
 ```
 
 ### 6.5 Module 1: `anax-kogito-codegen-extensions` — Tests
@@ -1257,7 +1262,105 @@ Kogito does **not** provide reusable test doubles. Each Kogito test module defin
 | Mock `DecisionModels` | Mockito mock of Kogito DMN API | `DmnWorkItemHandler` tests |
 | Mock `WorkItemNodeFactory` | Mockito mock of the codegen factory | `FunctionTypeHandler` tests |
 
-### 6.11 CI Pipeline Integration
+### 6.11 Dev Container Integration Test Platform
+
+The dev container runs Docker Compose with three infrastructure services alongside the development environment, providing a real test platform for integration and E2E testing.
+
+#### Docker Compose Services
+
+| Service | Image | Port(s) | Purpose |
+|---------|-------|---------|--------|
+| `metadata-platform` | `margic/anax-metadata-platform:latest` | `3001` | Real governance asset store — test `resolveGovernanceAssets` against live API |
+| `redpanda` | `redpandadata/redpanda:v24.1.7` | `19092` (Kafka), `18081` (Schema Registry) | Kafka-compatible broker for workflow event tests |
+| `redpanda-console` | `redpandadata/console:v2.6.0` | `8080` | UI for inspecting Kafka topics and messages |
+
+#### Service Connectivity from Dev Container
+
+Inside the dev container, services are reachable by Docker Compose service name:
+
+```properties
+# application-devcontainer.properties (or environment variables)
+METADATA_SERVER_URL=http://metadata-platform:3001
+spring.kafka.bootstrap-servers=redpanda:9092
+```
+
+From the host machine, services are reachable on forwarded ports:
+
+```
+Metadata Platform:   http://localhost:3001
+Kafka (Redpanda):    localhost:19092
+Schema Registry:     http://localhost:18081
+Redpanda Console:    http://localhost:8080
+```
+
+#### Integration Test Profiles
+
+Tests that require the real metadata server or Kafka are gated behind a Gradle property or JUnit tag so they don't run in CI (which uses WireMock stubs) unless Docker Compose services are available:
+
+```java
+@Tag("devcontainer")
+class MetadataServerLiveTest {
+
+    // Requires: metadata-platform container running on port 3001
+    private static final String METADATA_URL = 
+        System.getenv().getOrDefault("METADATA_SERVER_URL", "http://metadata-platform:3001");
+
+    @Test
+    void resolveGovernanceAssetsFromRealServer() {
+        // Given: a DMN model exists in the metadata platform
+        // (seeded via API or pre-loaded in the container image)
+
+        HttpMetadataServerClient client = new HttpMetadataServerClient(METADATA_URL);
+        Optional<DecisionAsset> result = client.findDecision(
+            "com.anax.decisions", "Order Type Routing");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().dmnXml()).contains("<definitions");
+    }
+}
+```
+
+```java
+@Tag("devcontainer")
+class KafkaWorkflowEventTest {
+
+    // Requires: Redpanda container running on port 19092 (internal: 9092)
+
+    @Autowired
+    KafkaTemplate<String, String> kafkaTemplate;
+
+    @Test
+    void workflowPublishesCompletionEvent() {
+        // Trigger workflow → assert Kafka topic receives completion event
+    }
+}
+```
+
+**Running dev container tests:**
+
+```bash
+# Run only devcontainer-tagged tests (inside dev container with Docker Compose up)
+./gradlew test -PincludeTags=devcontainer
+
+# Exclude devcontainer tests in CI (default)
+./gradlew test -PexcludeTags=devcontainer
+```
+
+**Gradle configuration for tag filtering:**
+
+```gradle
+// root build.gradle or convention plugin
+tasks.withType(Test).configureEach {
+    useJUnitPlatform {
+        def includeTags = project.findProperty('includeTags')
+        def excludeTags = project.findProperty('excludeTags')
+        if (includeTags) includeTags(includeTags.split(','))
+        if (excludeTags) excludeTags(excludeTags.split(','))
+    }
+}
+```
+
+### 6.12 CI Pipeline Integration
 
 ```yaml
 # GitHub Actions test workflow
@@ -1270,8 +1373,23 @@ test:
         - anax-kogito-codegen-plugin
         - anax-kogito-sample
   steps:
-    - run: ./gradlew :${{ matrix.module }}:test
+    - run: ./gradlew :${{ matrix.module }}:test -PexcludeTags=devcontainer
     - run: ./gradlew :${{ matrix.module }}:jacocoTestReport  # coverage
+
+# Optional: Integration tests with real services (Docker Compose)
+integration-test:
+  services:
+    metadata-platform:
+      image: margic/anax-metadata-platform:latest
+      ports: ["3001:3001"]
+    redpanda:
+      image: docker.redpanda.com/redpandadata/redpanda:v24.1.7
+      ports: ["19092:19092"]
+  steps:
+    - run: ./gradlew test -PincludeTags=devcontainer
+      env:
+        METADATA_SERVER_URL: http://metadata-platform:3001
+        KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
 ```
 
 ---

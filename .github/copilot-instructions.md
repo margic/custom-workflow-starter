@@ -111,6 +111,27 @@ The `resolveGovernanceAssets` task parses `.sw.json` `functions[]` arrays, extra
 - **Auto-configuration conditions**: `DmnWorkItemHandler` is `@ConditionalOnClass(DecisionModels.class)` so projects without DMN skip it. Other handlers use `@ConditionalOnMissingBean` for consumer override.
 - **Catalog endpoint**: enabled by default at `/anax/catalog`, disabled via `anax.catalog.enabled=false`
 
+## Dev Container & Docker Compose
+
+The dev container runs Docker Compose with infrastructure services for integration testing:
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| `metadata-platform` | `margic/anax-metadata-platform:latest` | `3001` | Real governance asset store (DMN models, Jolt specs) |
+| `redpanda` | `redpandadata/redpanda:v24.1.7` | `19092` (Kafka), `18081` (Schema Registry) | Kafka-compatible broker for workflow events |
+| `redpanda-console` | `redpandadata/console:v2.6.0` | `8080` | Kafka topic inspection UI |
+
+**Service URLs inside dev container:**
+- Metadata server: `http://metadata-platform:3001`
+- Kafka bootstrap: `redpanda:9092`
+
+**Service URLs from host:**
+- Metadata server: `http://localhost:3001`
+- Kafka: `localhost:19092`
+- Redpanda Console: `http://localhost:8080`
+
+Tests tagged `@Tag("devcontainer")` require these services. Run with `./gradlew test -PincludeTags=devcontainer`. CI excludes them by default.
+
 ## Build Commands
 
 ```bash

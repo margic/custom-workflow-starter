@@ -1,0 +1,55 @@
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/java:1-17-bullseye
+    volumes:
+      - ..:/workspaces/custom-workflow-starter:cached
+    command: sleep infinity
+    depends_on:
+      - metadata-platform
+      - redpanda
+
+  metadata-platform:
+    image: margic/anax-metadata-platform:latest
+    ports:
+      - "3001:3001"
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.7
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"  # Kafka API (external/host)
+      - "18081:18081"  # Schema Registry
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "internal://localhost:9644"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.6.0
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:9092"]
+          schemaRegistry:
+            enabled: true
+            urls: ["http://redpanda:8081"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda:9644"]
+    depends_on:
+      redpanda:
+        condition: service_healthy

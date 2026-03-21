@@ -1,6 +1,6 @@
-# Anax Kogito Spring Boot Starter
+# Custom Workflow Spring Boot Starter
 
-> Build event-driven CNCF Serverless Workflows with custom URI schemes, Kogito codegen, and a Copilot-discoverable metadata catalog.
+> Build event-driven CNCF Serverless Workflows with custom URI schemes, Kogito codegen, build-time asset resolution from a metadata server, and a Copilot-discoverable metadata catalog.
 
 **Java 17** · **Spring Boot 3.3.7** · **Kogito 10.1.0** · **Gradle 8.10+** · **CNCF Serverless Workflow spec v0.8**
 
@@ -8,9 +8,9 @@
 
 ## What Is This?
 
-The Anax Kogito Spring Boot Starter is a development platform for building **contribution services** — Spring Boot microservices that execute event-driven workflows authored as CNCF Serverless Workflow JSON definitions.
+The Custom Workflow Spring Boot Starter is a development platform for building **contribution services** — Spring Boot microservices that execute event-driven workflows authored as CNCF Serverless Workflow JSON definitions.
 
-It extends the Kogito runtime with three custom URI schemes (`dmn://`, `anax://`, `map://`) that let workflow authors invoke DMN decisions, Spring beans, and data-mapping transformations directly from `.sw.json` files — without writing Java glue code.
+It extends the Kogito runtime with three custom URI schemes (`dmn://`, `anax://`, `map://`) that let workflow authors invoke DMN decisions, Spring beans, and Jolt data transformations directly from `.sw.json` files — without writing Java glue code.
 
 The starter also generates a **metadata catalog** — a machine-readable inventory of available operations, rules, workflows, and beans — that enables GitHub Copilot (and other AI coding assistants) to generate valid workflow definitions on the first attempt.
 
@@ -253,9 +253,9 @@ The method receives all workflow data variables as a `Map` and must return a `Ma
 
 ---
 
-### `map://` — Data-Mapping Transformation
+### `map://` — Jolt Data Transformation
 
-Applies a named data transformation function registered as a Spring bean.
+Applies a [Jolt](https://github.com/bazaarvoice/jolt) transformation spec fetched from the metadata server at build time.
 
 **URI format:** `map://{mappingName}`
 
@@ -269,27 +269,17 @@ Applies a named data transformation function registered as a Spring bean.
 }
 ```
 
-| Segment       | Description                                                                      |
-| ------------- | -------------------------------------------------------------------------------- |
-| `mappingName` | Spring bean name implementing `Function<Map<String,Object>, Map<String,Object>>` |
-
-**Mapping bean contract:**
-
-```java
-@Component("x9-field-mapping")
-public class X9FieldMapping implements Function<Map<String, Object>, Map<String, Object>> {
-    @Override
-    public Map<String, Object> apply(Map<String, Object> input) {
-        // transform input fields to X9 format
-        return Map.of("x9Field1", input.get("sourceField1"), ...);
-    }
-}
-```
+| Segment       | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `mappingName` | Mapping identifier on the metadata server      |
 
 **How it works:**
 
-1. At build time, `MapFunctionTypeHandler` parses the URI and emits a `WorkItemNode` with `workName("map")` and parameter `MappingName`.
-2. At runtime, `MapWorkItemHandler` looks up the bean and applies the `Function`.
+1. At build time, `resolveGovernanceAssets` fetches the Jolt spec from `GET /api/mappings/{mappingName}` on the metadata server and places it at `META-INF/anax/mappings/{mappingName}.json` on the classpath.
+2. At build time, `MapFunctionTypeHandler` parses the URI and emits a `WorkItemNode` with `workName("map")` and parameter `MappingName`.
+3. At runtime, `MapWorkItemHandler` loads the Jolt spec from the classpath and applies the transformation.
+
+**Note:** The initial `MapWorkItemHandler` implementation is a stub — the Jolt execution engine will be wired in a later iteration. The stub establishes the URI pattern and metadata server fetch pipeline.
 
 ---
 
@@ -340,7 +330,7 @@ Example `catalog.json`:
     },
     {
       "scheme": "map",
-      "description": "Apply a named data-mapping transformation",
+      "description": "Apply a Jolt data transformation",
       "uriPattern": "map://{mappingName}",
       "parameters": [
         { "name": "MappingName", "description": "Registered mapping identifier", "source": "uri-segment-1" }
@@ -475,8 +465,8 @@ anax:
 ### Build all modules
 
 ```bash
-git clone https://github.com/margic/anax-kogito-starter.git
-cd anax-kogito-starter
+git clone https://github.com/margic/custom-workflow-starter.git
+cd custom-workflow-starter
 ./gradlew build
 ```
 

@@ -1,4 +1,4 @@
-# POC Reference: Proven Source Code for anax-kogito-starter
+# POC Reference: Proven Source Code for custom-workflow-starter
 
 **Purpose:** This document packages the complete, working POC implementation from `order-routing-service` that validates the architecture described in [ADR 006](0006-kogito-custom-uri-spring-boot-starter.md). Every file below has been compiled, tested, and verified end-to-end. The implementation plan prompts reference this document — use it as the authoritative source for patterns, class structures, and Kogito API usage.
 

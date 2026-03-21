@@ -1,0 +1,33 @@
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+        mavenBom "org.kie.kogito:kogito-bom:${kogitoVersion}"
+    }
+}
+
+dependencies {
+    // API dependencies
+    api 'org.kie.kogito:kogito-api'
+    api 'org.kie.kogito:jbpm-flow'
+    api 'org.kie.kogito:process-workitems'
+
+    // CompileOnly dependencies
+    compileOnly 'org.kie.kogito:kogito-dmn'
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
+    compileOnly 'org.springframework:spring-context'
+    compileOnly 'org.springframework.boot:spring-boot-starter-web'
+    compileOnly 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Annotation processors
+    annotationProcessor 'org.springframework.boot:spring-boot-autoconfigure-processor'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}

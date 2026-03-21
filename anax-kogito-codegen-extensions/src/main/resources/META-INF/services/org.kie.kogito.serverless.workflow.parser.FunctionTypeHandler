@@ -1,0 +1,3 @@
+com.anax.kogito.codegen.DmnFunctionTypeHandler
+com.anax.kogito.codegen.AnaxFunctionTypeHandler
+com.anax.kogito.codegen.MapFunctionTypeHandler

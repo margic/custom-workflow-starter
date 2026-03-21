@@ -1,0 +1,17 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // Kogito BOM for version management
+    implementation platform("org.kie.kogito:kogito-bom:${kogitoVersion}")
+
+    // All compileOnly - the codegen engine provides them at runtime
+    compileOnly 'org.kie.kogito:kogito-serverless-workflow-builder'
+    compileOnly 'io.serverlessworkflow:serverlessworkflow-api'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}

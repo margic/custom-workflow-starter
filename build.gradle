@@ -1,0 +1,35 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    group = 'com.anax'
+    version = rootProject.version
+
+    repositories {
+        mavenCentral()
+    }
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(17)
+        }
+    }
+
+    // Apply maven-publish to all subprojects except the plugin
+    if (project.name != 'anax-kogito-codegen-plugin') {
+        apply plugin: 'java-library'
+        apply plugin: 'maven-publish'
+
+        publishing {
+            publications {
+                maven(MavenPublication) {
+                    from components.java
+                }
+            }
+        }
+    }
+}

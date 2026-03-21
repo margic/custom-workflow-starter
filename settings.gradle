@@ -1,0 +1,6 @@
+rootProject.name = 'anax-kogito-starter'
+
+include 'anax-kogito-codegen-extensions'
+include 'anax-kogito-spring-boot-starter'
+include 'anax-kogito-codegen-plugin'
+include 'anax-kogito-sample'

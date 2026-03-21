@@ -6,7 +6,7 @@
       "version": "17",
       "jdkDistro": "ms"
     },
-    "ghcr.io/devcontainers/features/maven:1": {}
+    "ghcr.io/devcontainers/features/gradle:1": {}
   },
   "customizations": {
     "vscode": {
@@ -14,7 +14,7 @@
         "redhat.java",
         "vscjava.vscode-java-debug",
         "vscjava.vscode-java-test",
-        "vscjava.vscode-maven",
+        "vscjava.vscode-gradle",
         "vscjava.vscode-java-dependency"
       ],
       "settings": {

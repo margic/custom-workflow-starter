@@ -1,0 +1,53 @@
+{
+  "id": "hello-world",
+  "name": "Hello World Demo",
+  "version": "1.0",
+  "specVersion": "0.8",
+  "start": "Greet",
+  "functions": [
+    {
+      "name": "greetFunction",
+      "type": "custom",
+      "operation": "anax://greetingService/greet"
+    },
+    {
+      "name": "logFunction",
+      "type": "custom",
+      "operation": "sysout"
+    }
+  ],
+  "states": [
+    {
+      "name": "Greet",
+      "type": "operation",
+      "actions": [
+        {
+          "name": "greetAction",
+          "functionRef": {
+            "refName": "greetFunction",
+            "arguments": {
+              "name": "${ .name }"
+            }
+          }
+        }
+      ],
+      "transition": "LogResult"
+    },
+    {
+      "name": "LogResult",
+      "type": "operation",
+      "actions": [
+        {
+          "name": "logAction",
+          "functionRef": {
+            "refName": "logFunction",
+            "arguments": {
+              "message": "${ \"Workflow complete — greeting: \" + .greeting }"
+            }
+          }
+        }
+      ],
+      "end": true
+    }
+  ]
+}

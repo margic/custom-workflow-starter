@@ -1,0 +1,25 @@
+plugins {
+    id 'java-gradle-plugin'
+    id 'maven-publish'
+}
+
+gradlePlugin {
+    plugins {
+        anaxKogitoCodegen {
+            id = 'com.anax.kogito-codegen'
+            implementationClass = 'com.anax.kogito.gradle.AnaxKogitoCodegenPlugin'
+        }
+    }
+}
+
+dependencies {
+    implementation gradleApi()
+
+    // Jackson for JSON processing in CatalogManifestTask
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}

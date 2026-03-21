@@ -1,0 +1,28 @@
+plugins {
+    id 'org.springframework.boot' version "${springBootVersion}"
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+    id 'com.anax.kogito-codegen'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+        mavenBom "org.kie.kogito:kogito-bom:${kogitoVersion}"
+    }
+}
+
+dependencies {
+    implementation project(':anax-kogito-spring-boot-starter')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.kie.kogito:kogito-dmn'
+    implementation 'org.kie.kogito:kogito-serverless-workflow-builder'
+    implementation 'org.jbpm:jbpm-spring-boot-starter'
+    implementation 'org.drools:drools-decisions-spring-boot-starter'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}

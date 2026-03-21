@@ -1,6 +1,6 @@
 # Phase 3 Specification: Gradle Plugin, URI Resolution & Metadata Server Client
 
-**Status:** DRAFT — For Review  
+**Status:** AGREED — API contract confirmed by Metadata Team (March 21, 2026)  
 **Date:** March 2026  
 **Parent:** [ADR 006](0006-kogito-custom-uri-spring-boot-starter.md) · [Implementation Plan](0006-IMPLEMENTATION-PLAN.md)
 
@@ -66,7 +66,7 @@ unreserved     = ALPHA / DIGIT
 | `modelName` | DMN model name (maps to `<definitions name="...">`) | Last URI path segment | `Order Type Routing` |
 | `decisionId` (derived) | Metadata server lookup key | Slug of `{namespace}/{modelName}` or **direct mapping via metadata server search** | `order-type-routing` |
 
-**Resolution algorithm:**
+**Resolution algorithm (confirmed — two-step):**
 
 ```
 Input:  "dmn://com.anax.decisions/Order Type Routing"
@@ -75,14 +75,28 @@ Input:  "dmn://com.anax.decisions/Order Type Routing"
               ├── namespace = "com.anax.decisions"  (everything before last '/')
               └── modelName = "Order Type Routing"   (everything after last '/')
 
-API call: GET {metadataServerUrl}/api/decisions?namespace={namespace}&name={modelName}&status=active
-          OR
-          GET {metadataServerUrl}/api/decisions/{decisionId}  (if decisionId is known)
+Step 1 — Resolve decisionId:
+  GET {metadataServerUrl}/api/decisions?namespace=com.anax.decisions&name=Legal%20Order%20Routing&status=active
+  Response: { "data": [{ "decisionId": "legal-order-routing", ... }], "pagination": { "total": 1 } }
+  Extract: decisionId = data[0].decisionId  →  "legal-order-routing"
 
-Output:  DMN XML → build/generated/resources/kogito/{slugified-modelName}.dmn
+  Error cases:
+    data.length == 0  →  FAIL BUILD ("no active decision found for dmn://...")
+    data.length >  1  →  FAIL BUILD ("ambiguous: multiple active decisions match dmn://...")
+
+Step 2 — Download original DMN XML:
+  GET {metadataServerUrl}/api/decisions/legal-order-routing/export?format=dmn
+  Response: raw DMN XML (Content-Type: application/xml)
+
+Output:  build/generated/resources/kogito/legal-order-routing.dmn
 ```
 
-**DECIDED:** The metadata server stores the **original DMN XML file** as uploaded by the author. The plugin fetches this raw `.dmn` file — Kogito codegen requires actual DMN XML, not the JSON representation the server may also provide for UI/search purposes. The metadata server API must serve the original artifact via an export endpoint (e.g., `GET /api/decisions/:decisionId/export?format=dmn`) or a dedicated download path. The JSON representation is irrelevant to the build plugin.
+**CONFIRMED by metadata team (March 21, 2026):**
+- The metadata server stores the **original DMN XML** in a `sourceContent` field.
+- The `decisionId` is a **user-defined slug** (e.g., `legal-order-routing`) set at creation time.
+- The search endpoint supports `namespace` and `name` query parameters (case-insensitive).
+- The export endpoint returns the original DMN XML with `Content-Type: application/xml`.
+- **Edge case:** Decisions authored purely through the UI (no uploaded `.dmn` file) have no `sourceContent` — the export endpoint returns 404 for these. This is acceptable; our workflows must reference uploaded DMN artifacts.
 
 #### `map://{mappingName}`
 
@@ -102,7 +116,7 @@ API call: GET {metadataServerUrl}/api/mappings/{mappingId}
 Output:  Jolt spec JSON → build/generated/resources/kogito/META-INF/anax/mappings/{mappingName}.json
 ```
 
-**Same principle as DMN:** The metadata server stores the **original Jolt spec JSON** as uploaded by the author. The plugin fetches this raw spec file. The metadata server may also provide a parsed/structured representation for its UI, but the plugin needs the original artifact.
+**CONFIRMED by metadata team:** Same principle as DMN — the metadata server stores the **original Jolt spec JSON** as uploaded by the author and serves it via the export endpoint. The `mappingId` in the URI maps directly to the metadata server's `mappingId` (no search step needed).
 
 For now, the `MapWorkItemHandler` is a stub (passes data through). The Jolt engine is wired in a later iteration. The plugin still fetches and writes the spec to the classpath at build time — this validates that the asset exists and is accessible.
 
@@ -129,19 +143,31 @@ For now, the `MapWorkItemHandler` is a stub (passes data through). The Jolt engi
        │                     │                       │                    │
        │                     │  2a. dmn:// URI found │                    │
        │                     │──────────────────────►│                    │
-       │                     │  GET /api/decisions/  │                    │
-       │                     │  {decisionId}/export  │                    │
+       │                     │  GET /api/decisions?  │                    │
+       │                     │  namespace=&name=     │                    │
+       │                     │  &status=active       │                    │
        │                     │                       │                    │
-       │                     │  3a. DMN XML response │                    │
+       │                     │  3a. Search results   │                    │
+       │                     │  { data: [{ decision- │                    │
+       │                     │    Id: "..."}] }      │                    │
        │                     │◄──────────────────────│                    │
        │                     │                       │                    │
-       │                     │  4a. Write .dmn file  │                    │
+       │                     │  4a. GET /decisions/  │                    │
+       │                     │  {decisionId}/export  │                    │
+       │                     │  ?format=dmn          │                    │
+       │                     │──────────────────────►│                    │
+       │                     │                       │                    │
+       │                     │  5a. DMN XML response │                    │
+       │                     │◄──────────────────────│                    │
+       │                     │                       │                    │
+       │                     │  6a. Write .dmn file  │                    │
        │                     │───────────────────────────────────────────►│
        │                     │                       │                    │
        │                     │  2b. map:// URI found │                    │
        │                     │──────────────────────►│                    │
        │                     │  GET /api/mappings/   │                    │
-       │                     │  {mappingId}          │                    │
+       │                     │  {mappingId}/export   │                    │
+       │                     │  ?format=jolt         │                    │
        │                     │                       │                    │
        │                     │  3b. Mapping JSON     │                    │
        │                     │◄──────────────────────│                    │
@@ -164,8 +190,8 @@ After `resolveGovernanceAssets` completes successfully:
 
 ```
 build/generated/resources/kogito/
-├── order-type-routing.dmn                          ← from dmn://com.anax.decisions/Order Type Routing
-├── risk-assessment.dmn                             ← from dmn://com.anax.decisions/Risk Assessment
+├── legal-order-routing.dmn                         ← from dmn://com.anax.decisions/Legal Order Routing (decisionId: legal-order-routing)
+├── risk-assessment.dmn                             ← from dmn://com.anax.decisions/Risk Assessment (decisionId: risk-assessment)
 └── META-INF/
     └── anax/
         └── mappings/
@@ -174,8 +200,8 @@ build/generated/resources/kogito/
 ```
 
 **File naming rules:**
-- DMN files: `{modelName}` slugified (spaces → hyphens, lowercase) + `.dmn`
-- Mapping files: `{mappingName}` used as-is (already a slug) + `.json`
+- DMN files: `{decisionId}.dmn` — uses the slug from the search result (e.g., `legal-order-routing.dmn`)
+- Mapping files: `{mappingId}.json` — used as-is from the `map://` URI (e.g., `x9-field-mapping.json`)
 
 ---
 
@@ -377,6 +403,7 @@ implementation "org.drools:drools-decisions-spring-boot-starter"
 ```java
 package com.anax.kogito.gradle.metadata;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -387,34 +414,34 @@ import java.util.Optional;
 public interface MetadataServerClient {
 
     /**
-     * Fetch a DMN decision model by its identifier.
+     * Search for decisions by namespace and model name.
+     * Used to resolve a dmn:// URI to a decisionId.
      *
-     * @param decisionId the decision identifier (derived from dmn:// URI)
-     * @return the resolved decision, or empty if not found (404)
-     * @throws MetadataServerException on communication errors (non-404)
-     */
-    Optional<ResolvedDecision> fetchDecision(String decisionId);
-
-    /**
-     * Search for a decision by namespace and model name.
-     * Used when the decisionId is not known directly and must be
-     * resolved from the dmn:// URI segments.
-     *
-     * @param namespace the DMN namespace (first URI segment)
-     * @param modelName the DMN model name (second URI segment)
-     * @return the resolved decision, or empty if not found
+     * @param namespace the DMN namespace (from URI authority segment)
+     * @param modelName the DMN model name (from URI path segment)
+     * @return list of matching decisions (may be empty, one, or many)
      * @throws MetadataServerException on communication errors
      */
-    Optional<ResolvedDecision> findDecision(String namespace, String modelName);
+    List<DecisionSearchResult> findDecisions(
+        String namespace, String modelName);
 
     /**
-     * Fetch a mapping specification by its identifier.
+     * Download the original DMN XML for a decision.
      *
-     * @param mappingId the mapping identifier (from map:// URI)
-     * @return the resolved mapping, or empty if not found (404)
+     * @param decisionId the decision slug (from search results)
+     * @return the raw DMN XML bytes, or empty if no sourceContent stored (404)
      * @throws MetadataServerException on communication errors (non-404)
      */
-    Optional<ResolvedMapping> fetchMapping(String mappingId);
+    Optional<byte[]> exportDecisionDmn(String decisionId);
+
+    /**
+     * Download the original Jolt spec for a mapping.
+     *
+     * @param mappingId the mapping identifier (from map:// URI)
+     * @return the raw Jolt spec JSON bytes, or empty if not found (404)
+     * @throws MetadataServerException on communication errors (non-404)
+     */
+    Optional<byte[]> exportMappingJolt(String mappingId);
 
     /**
      * Health check — verify the metadata server is reachable.
@@ -431,25 +458,15 @@ public interface MetadataServerClient {
 package com.anax.kogito.gradle.metadata;
 
 /**
- * A resolved DMN decision artifact ready to be written to the build output.
+ * A decision returned from the search endpoint.
+ * Contains metadata needed to identify the decision and call the export endpoint.
  */
-public record ResolvedDecision(
-    String decisionId,
-    String name,
-    String namespace,
-    String version,
-    byte[] dmnXml,         // Raw DMN XML content (for Kogito codegen)
-    String rawJson         // Original JSON response (for catalog generation)
-) {}
-
-/**
- * A resolved mapping artifact ready to be written to the build output.
- */
-public record ResolvedMapping(
-    String mappingId,
-    String name,
-    String version,
-    String specJson        // Mapping spec JSON (field mapping or Jolt spec)
+public record DecisionSearchResult(
+    String decisionId,      // User-defined slug, e.g. "legal-order-routing"
+    String name,            // Display name, e.g. "Legal Order Routing"
+    String namespace,       // DMN namespace, e.g. "com.anax.decisions"
+    String version,         // Semantic version, e.g. "1.0.0"
+    String status           // "active", "draft", or "deprecated"
 ) {}
 
 /**
@@ -470,16 +487,23 @@ public class MetadataServerException extends RuntimeException {
 }
 ```
 
+Note: The `ResolvedDecision` / `ResolvedMapping` DTOs from the earlier draft are removed. The client now returns raw bytes from export endpoints — the `ResolveGovernanceAssetsTask` writes them directly to the build output. This simplifies the client and avoids double-parsing.
+```
+
 ### 4.4 HTTP Implementation
 
 ```java
 package com.anax.kogito.gradle.metadata;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -503,22 +527,7 @@ public class HttpMetadataServerClient implements MetadataServerClient {
     }
 
     @Override
-    public Optional<ResolvedDecision> fetchDecision(String decisionId) {
-        // Fetch raw DMN XML via export endpoint
-        String url = baseUrl + "/api/decisions/"
-            + URI.create("").resolve(decisionId).toString()
-            + "/export?format=dmn";
-        HttpResponse<String> response = doGet(url);
-
-        if (response.statusCode() == 404) return Optional.empty();
-        validateResponse(response, url);
-
-        // Response body is raw DMN XML — pass through to ResolvedDecision
-        return Optional.of(parseDecisionResponse(response.body()));
-    }
-
-    @Override
-    public Optional<ResolvedDecision> findDecision(
+    public List<DecisionSearchResult> findDecisions(
             String namespace, String modelName) {
         String url = baseUrl + "/api/decisions?namespace="
             + URLEncoder.encode(namespace, StandardCharsets.UTF_8)
@@ -527,25 +536,37 @@ public class HttpMetadataServerClient implements MetadataServerClient {
             + "&status=active";
         HttpResponse<String> response = doGet(url);
 
-        if (response.statusCode() == 404) return Optional.empty();
+        if (response.statusCode() == 404) return Collections.emptyList();
         validateResponse(response, url);
 
-        // Parse search results, return first match
-        return parseDecisionSearchResponse(response.body());
+        // Parse { "data": [...], "pagination": {...} } response
+        return parseDecisionSearchResults(response.body());
     }
 
     @Override
-    public Optional<ResolvedMapping> fetchMapping(String mappingId) {
-        // Fetch raw Jolt spec via export endpoint
-        String url = baseUrl + "/api/mappings/"
-            + URI.create("").resolve(mappingId).toString()
-            + "/export?format=jolt";
-        HttpResponse<String> response = doGet(url);
+    public Optional<byte[]> exportDecisionDmn(String decisionId) {
+        String url = baseUrl + "/api/decisions/"
+            + URLEncoder.encode(decisionId, StandardCharsets.UTF_8)
+            + "/export?format=dmn";
+        HttpResponse<byte[]> response = doGetBytes(url);
 
         if (response.statusCode() == 404) return Optional.empty();
         validateResponse(response, url);
 
-        return Optional.of(parseMappingResponse(response.body()));
+        return Optional.of(response.body());
+    }
+
+    @Override
+    public Optional<byte[]> exportMappingJolt(String mappingId) {
+        String url = baseUrl + "/api/mappings/"
+            + URLEncoder.encode(mappingId, StandardCharsets.UTF_8)
+            + "/export?format=jolt";
+        HttpResponse<byte[]> response = doGetBytes(url);
+
+        if (response.statusCode() == 404) return Optional.empty();
+        validateResponse(response, url);
+
+        return Optional.of(response.body());
     }
 
     @Override
@@ -584,7 +605,25 @@ public class HttpMetadataServerClient implements MetadataServerClient {
         }
     }
 
-    private void validateResponse(HttpResponse<String> response, String url) {
+    private HttpResponse<byte[]> doGetBytes(String url) {
+        try {
+            return httpClient.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(REQUEST_TIMEOUT)
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofByteArray()
+            );
+        } catch (Exception e) {
+            throw new MetadataServerException(
+                "Failed to connect to metadata server: " + e.getMessage(),
+                0, url
+            );
+        }
+    }
+
+    private void validateResponse(HttpResponse<?> response, String url) {
         if (response.statusCode() >= 400) {
             throw new MetadataServerException(
                 "Metadata server returned HTTP " + response.statusCode()
@@ -601,7 +640,9 @@ public class HttpMetadataServerClient implements MetadataServerClient {
 ```java
 package com.anax.kogito.gradle.metadata;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -611,38 +652,46 @@ import java.util.Optional;
  */
 public class StubMetadataServerClient implements MetadataServerClient {
 
-    private final Map<String, ResolvedDecision> decisions = new HashMap<>();
-    private final Map<String, ResolvedMapping> mappings = new HashMap<>();
+    private final Map<String, DecisionSearchResult> decisions = new HashMap<>();
+    private final Map<String, byte[]> decisionDmnXml = new HashMap<>();
+    private final Map<String, byte[]> mappingJoltSpecs = new HashMap<>();
 
     /** Register a decision for testing */
-    public StubMetadataServerClient withDecision(ResolvedDecision decision) {
+    public StubMetadataServerClient withDecision(
+            DecisionSearchResult decision, byte[] dmnXml) {
         decisions.put(decision.decisionId(), decision);
+        decisionDmnXml.put(decision.decisionId(), dmnXml);
         return this;
     }
 
     /** Register a mapping for testing */
-    public StubMetadataServerClient withMapping(ResolvedMapping mapping) {
-        mappings.put(mapping.mappingId(), mapping);
+    public StubMetadataServerClient withMapping(
+            String mappingId, byte[] joltSpec) {
+        mappingJoltSpecs.put(mappingId, joltSpec);
         return this;
     }
 
     @Override
-    public Optional<ResolvedDecision> fetchDecision(String decisionId) {
-        return Optional.ofNullable(decisions.get(decisionId));
-    }
-
-    @Override
-    public Optional<ResolvedDecision> findDecision(
+    public List<DecisionSearchResult> findDecisions(
             String namespace, String modelName) {
-        return decisions.values().stream()
-            .filter(d -> namespace.equals(d.namespace())
-                && modelName.equals(d.name()))
-            .findFirst();
+        List<DecisionSearchResult> results = new ArrayList<>();
+        for (DecisionSearchResult d : decisions.values()) {
+            if (namespace.equalsIgnoreCase(d.namespace())
+                    && modelName.equalsIgnoreCase(d.name())) {
+                results.add(d);
+            }
+        }
+        return results;
     }
 
     @Override
-    public Optional<ResolvedMapping> fetchMapping(String mappingId) {
-        return Optional.ofNullable(mappings.get(mappingId));
+    public Optional<byte[]> exportDecisionDmn(String decisionId) {
+        return Optional.ofNullable(decisionDmnXml.get(decisionId));
+    }
+
+    @Override
+    public Optional<byte[]> exportMappingJolt(String mappingId) {
+        return Optional.ofNullable(mappingJoltSpecs.get(mappingId));
     }
 
     @Override
@@ -699,17 +748,32 @@ anaxKogito {
 
 **Decision:** Same pattern as DMN. The metadata server stores the **original Jolt spec JSON** as uploaded by the author and serves it via an export/download endpoint. The handler is a stub for now; the Jolt engine comes later. See §2.2.
 
-### Q3: Decision ID Resolution Strategy
+### ~~Q3: Decision ID Resolution Strategy~~ — RESOLVED
 
-How does the plugin map `dmn://com.anax.decisions/Order Type Routing` to an API call?
+**Decision (confirmed by metadata team March 21, 2026): Option A — Search endpoint.**
 
-| Option | Description | Trade-off |
-|--------|-------------|-----------|
-| **A. Search endpoint** | `GET /api/decisions?namespace=com.anax.decisions&name=Order Type Routing&status=active` | Requires search API support; handles display names with spaces |
-| **B. Slugified ID** | Convert namespace+name to slug: `com-anax-decisions--order-type-routing` | Fragile; naming convention coupling |
-| **C. URI is the ID** | `decisionId` on the metadata server IS the full URI path: `com.anax.decisions/Order Type Routing` | Requires metadata server to accept URI-encoded IDs |
+The plugin uses
+`GET /api/decisions?namespace={ns}&name={name}&status=active`
+to resolve a `dmn://` URI to a `decisionId` slug, then calls the export endpoint. The metadata team confirmed that:
 
-**Recommendation: A** — Use the search endpoint with namespace + name query parameters. This is the most robust approach and doesn't require the metadata server to change its ID scheme. The client interface already includes `findDecision(namespace, modelName)` for this reason.
+- `namespace` and `name` are supported as query parameters (case-insensitive)
+- `decisionId` is a **user-defined slug** set at creation time (e.g., `legal-order-routing`)
+- `status` filter supports `active`, `draft`, `deprecated`
+
+---
+
+## 5.1 Edge Cases Identified From Metadata Team Response
+
+These must be handled by `ResolveGovernanceAssetsTask`:
+
+| Edge Case | Detection | Plugin Behavior |
+|-----------|-----------|-----------------|
+| **Multiple active decisions match** | `data.length > 1` from search | **FAIL BUILD** — `"Ambiguous: {n} active decisions match dmn://{namespace}/{modelName}. Expected exactly one. DecisionIds: [{id1}, {id2}]"` |
+| **No active decision matches** | `data.length == 0` from search | **FAIL BUILD** — `"No active decision found for dmn://{namespace}/{modelName}. Verify the decision exists with status 'active' on the metadata server."` |
+| **Decision exists but no DMN XML stored** | Export returns 404 with `"does not have original DMN XML stored"` | **FAIL BUILD** — `"Decision '{decisionId}' exists but has no DMN XML. It may have been authored through the UI without uploading a .dmn file. Re-publish with the original DMN file."` |
+| **Mapping exists but no Jolt spec stored** | Export returns 404 with `"does not have a Jolt spec stored"` | **FAIL BUILD** — `"Mapping '{mappingId}' exists but has no Jolt spec. Re-publish with the original Jolt spec JSON."` |
+| **Metadata server returns paginated results** | `pagination.total > pagination.pageSize` | Log warning; use first result. Future: iterate pages if needed. |
+| **Status field not `active`** | Should not occur when using `?status=active` filter | N/A — filtered server-side |
 
 ---
 
@@ -1088,20 +1152,117 @@ Phase 3 implementation should proceed in this order:
 
 ---
 
-## Appendix A: Metadata Server API Quick Reference
+## Appendix A: Metadata Server API Contract (Confirmed March 21, 2026)
 
-Endpoints consumed by the Gradle plugin at build time:
+All endpoints confirmed live on the metadata server's `business-friendly-viewer` branch (98 passing tests).
 
-| Endpoint | Method | Purpose | Response |
-|----------|--------|---------|----------|
-| `/api/decisions?namespace={ns}&name={name}&status=active` | GET | Find decision by namespace + name | Array of decision objects |
-| `/api/decisions/{decisionId}` | GET | Fetch decision metadata | Decision object with `definition` |
-| `/api/decisions/{decisionId}/export?format=dmn` | GET | **Required** — Download original DMN XML | Raw DMN XML (`application/xml`) |
-| `/api/mappings/{mappingId}` | GET | Fetch mapping metadata | Mapping object with `fields[]` |
-| `/api/mappings/{mappingId}/export?format=jolt` | GET | **Required** — Download original Jolt spec | Raw Jolt spec (`application/json`) |
-| `/health` | HEAD | Health check | 200 if healthy |
+### A.1 Decision Search
+
+```
+GET /api/decisions?namespace={ns}&name={name}&status=active
+```
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "decisionId": "legal-order-routing",
+      "name": "Legal Order Routing",
+      "namespace": "com.anax.decisions",
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Routes incoming legal orders...",
+      "hitPolicy": "FIRST",
+      "inputs": ["..."],
+      "outputs": ["..."],
+      "rules": ["..."]
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 1,
+    "totalPages": 1
+  }
+}
+```
+
+Additional query parameters: `tags` (comma-separated), `q` (full-text), `page`, `pageSize`.
+
+### A.2 Decision Export
+
+```
+GET /api/decisions/{decisionId}/export?format=dmn
+```
+
+**Response (200):**
+- **Content-Type:** `application/xml`
+- **Content-Disposition:** `attachment; filename="{decisionId}.dmn"`
+- **Body:** Raw DMN XML
+
+**Response (404) — no sourceContent:**
+```json
+{"error": {"code": "NOT_FOUND", "message": "Decision {decisionId} does not have original DMN XML stored..."}}
+```
+
+### A.3 Mapping Export
+
+```
+GET /api/mappings/{mappingId}/export?format=jolt
+```
+
+**Response (200):**
+- **Content-Type:** `application/json`
+- **Content-Disposition:** `attachment; filename="{mappingId}.json"`
+- **Body:** Raw Jolt spec JSON
+
+**Response (404):**
+```json
+{"error": {"code": "NOT_FOUND", "message": "Mapping not found: {mappingId}"}}
+```
+
+### A.4 Health Check
+
+```
+GET  /health    → {"status": "ok"}
+HEAD /health    → 200 (empty body)
+GET  /api/health → {"status": "ok", "storageBackend": "memory", "assetCount": 42}
+```
+
+### A.5 Error Response Format
+
+All errors use a consistent structure:
+
+```json
+{"error": {"code": "NOT_FOUND|BAD_REQUEST|INTERNAL_ERROR", "message": "Human-readable description"}}
+```
+
+| Scenario | HTTP Status | Error Code |
+|----------|-------------|------------|
+| Asset found | 200 | — |
+| Asset not found | 404 | `NOT_FOUND` |
+| Missing required parameter | 400 | `BAD_REQUEST` |
+| Server error | 500 | `INTERNAL_ERROR` |
+
+### A.6 Key Data Model Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `decisionId` | string | User-defined slug identifier |
+| `name` | string | Display name (maps to DMN `<definitions name="...">`) |
+| `namespace` | string | DMN namespace (maps to DMN `<definitions namespace="...">`) |
+| `version` | string | Semantic version |
+| `status` | string | `active` / `draft` / `deprecated` |
+| `sourceContent` | string | Original DMN XML — served by the export endpoint |
 
 **Authentication:** None (PoC scope). Future: Azure AD OAuth2 bearer tokens.
+
+### A.7 Open Item From Metadata Team
+
+> If decisions authored purely through our UI (no uploaded DMN file) need to be consumable by your plugin, we would need to implement DMN XML *generation* from our internal model. Currently, the export endpoint returns 404 for UI-authored decisions that lack `sourceContent`.
+
+**Our position:** Acceptable for now. Workflows must reference DMN artifacts that were uploaded with original XML. The plugin will produce a clear error message for this case (see §5.1).
 
 ## Appendix B: Error Messages
 
@@ -1110,8 +1271,10 @@ The plugin must produce clear, actionable error messages:
 | Scenario | Error Message |
 |----------|---------------|
 | Metadata server unreachable | `Cannot connect to metadata server at {url}. Ensure the server is running or set anaxKogito.metadataServerUrl='stub' for offline builds.` |
-| Decision not found (404) | `DMN decision not found on metadata server: dmn://{namespace}/{modelName} (referenced by {swJsonFile}). Ensure the decision exists and has status 'active'.` |
-| Mapping not found (404) | `Mapping not found on metadata server: map://{mappingName} (referenced by {swJsonFile}). Ensure the mapping exists and has status 'active'.` |
+| No active decision found | `No active decision found for dmn://{namespace}/{modelName} (referenced by {swJsonFile}). Verify the decision exists with status 'active' on the metadata server.` |
+| Multiple active decisions match | `Ambiguous: {n} active decisions match dmn://{namespace}/{modelName} (referenced by {swJsonFile}). Expected exactly one. DecisionIds: [{id1}, {id2}].` |
+| Decision has no DMN XML stored | `Decision '{decisionId}' exists but has no DMN XML (referenced by {swJsonFile}). It may have been authored via UI without uploading a .dmn file. Re-publish with the original DMN file.` |
+| Mapping not found (404) | `Mapping not found on metadata server: map://{mappingName} (referenced by {swJsonFile}). Ensure the mapping exists and has a Jolt spec stored.` |
 | Server error (500) | `Metadata server returned error {statusCode} for {url}. Check server logs.` |
 | No metadata server URL configured | `Metadata server URL is not configured. Set 'anaxKogito.metadataServerUrl' in build.gradle or the METADATA_SERVER_URL environment variable. Use 'stub' for offline builds.` |
 | Malformed custom URI | `Invalid custom function URI: '{uri}' in {swJsonFile}. Expected format: {scheme}://{segments}` |

@@ -96,10 +96,17 @@ public class AnaxKogitoCodegenPlugin implements Plugin<Project> {
         project.getDependencies().add(codegenConfig.getName(),
             "org.kie.kogito:kogito-dmn:" + KOGITO_VERSION);
 
-        // Add our custom codegen extensions (same version as this plugin)
-        String projectVersion = project.getVersion().toString();
-        project.getDependencies().add(codegenConfig.getName(),
-            "com.anax:anax-kogito-codegen-extensions:" + projectVersion);
+        // Add our custom codegen extensions
+        // Try to use project dependency if available, otherwise use Maven coordinates
+        org.gradle.api.Project extensionsProject = project.getRootProject()
+            .findProject(":anax-kogito-codegen-extensions");
+        if (extensionsProject != null) {
+            project.getDependencies().add(codegenConfig.getName(), extensionsProject);
+        } else {
+            String projectVersion = project.getVersion().toString();
+            project.getDependencies().add(codegenConfig.getName(),
+                "com.anax:anax-kogito-codegen-extensions:" + projectVersion);
+        }
     }
 
     /**

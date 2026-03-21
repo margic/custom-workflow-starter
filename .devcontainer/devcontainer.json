@@ -1,13 +1,6 @@
 {
   "name": "Java 17",
   "image": "mcr.microsoft.com/devcontainers/java:1-17-bullseye",
-  "features": {
-    "ghcr.io/devcontainers/features/java:1": {
-      "version": "17",
-      "jdkDistro": "ms"
-    },
-    "ghcr.io/devcontainers/features/gradle:1": {}
-  },
   "customizations": {
     "vscode": {
       "extensions": [
@@ -29,5 +22,5 @@
       }
     }
   },
-  "postCreateCommand": "java -version"
+  "postCreateCommand": "java -version && bash -i -c 'sdk install gradle'"
 }

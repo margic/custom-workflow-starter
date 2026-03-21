@@ -783,40 +783,127 @@ These must be handled by `ResolveGovernanceAssetsTask`:
 
 - **Every module is independently testable** — no module requires a running metadata server or Kogito engine to run its unit tests
 - **The metadata server client interface enables test doubles** — stub for unit tests, WireMock for integration tests
-- **Kogito's test infrastructure is leveraged** where it provides value — `kogito-spring-boot-test` for runtime handler tests
+- **No proprietary Kogito test artifact is required** — Kogito does **not** ship a generic work-item unit test harness. We follow the same pattern Kogito uses internally: mock `KogitoWorkItem`, `KogitoWorkItemManager`, and `KogitoWorkItemHandler` with Mockito, then call `activateWorkItemHandler()` directly
 - **Gradle TestKit (`GradleRunner`)** for plugin functional tests — these are inherently slower but critical
 - **No test requires network access** — metadata server interactions are stubbed or mocked at every level
 
-### 6.2 Test Pyramid by Module
+### 6.2 Assessment of Kogito Test Libraries
+
+Research of the `incubator-kie-kogito-runtimes` repository reveals the following:
+
+| Artifact | Actual Content | Useful For Us? |
+|----------|----------------|----------------|
+| `kogito-test-utils` | **Testcontainers wrappers** for Infinispan, Kafka, Keycloak, MongoDB, PostgreSQL, Redis. Provides `KogitoInfinispanContainer`, `KogitoKafkaContainer`, etc. | **No** — we don't need database or messaging containers |
+| `kogito-spring-boot-test-utils` (in `springboot/test/`) | Spring Boot wrappers around the Testcontainers (e.g., `InfinispanSpringBootTestResource`, `KafkaSpringBootTestResource`) | **No** — same infrastructure focus |
+| `kogito-api` (test scope) | `KogitoWorkItem`, `KogitoWorkItemHandler`, `KogitoWorkItemManager` interfaces | **Yes** — needed as compile dependency for handler tests |
+| `jbpm-flow` (test scope) | `KogitoWorkItemImpl` — concrete work-item implementation we can instantiate directly in tests | **Yes** — provides the real `KogitoWorkItem` implementation |
+| `process-workitems` | `DefaultKogitoWorkItemHandler`, `KogitoDefaultWorkItemManager`, `KogitoWorkItemImpl` | **Yes** — base classes our handlers extend |
+
+**Key finding:** There is no `kogito-spring-boot-starter-test` artifact providing a high-level test harness. Kogito's own tests (e.g., `RestWorkItemHandlerTest`, `WorkItemTest`) use plain **JUnit 5 + Mockito** to mock work-item interfaces and directly invoke handler methods. We follow the same approach.
+
+### 6.3 How Kogito Tests Work Items Internally
+
+Kogito uses two patterns for testing `DefaultKogitoWorkItemHandler` subclasses. Our tests follow these proven patterns:
+
+**Pattern 1: Direct handler invocation with Mockito (unit tests)**
+
+Used by `RestWorkItemHandlerTest` in `kogito-rest-workitem`:
+
+```java
+// Kogito's actual pattern — mock the interfaces, call handler directly
+@ExtendWith(MockitoExtension.class)
+class RestWorkItemHandlerTest {
+    @Mock KogitoWorkItemManager manager;
+    KogitoWorkItemImpl workItem;            // real impl, not mock
+
+    @BeforeEach
+    void init() {
+        workItem = new KogitoWorkItemImpl();
+        workItem.setId("1");
+        parameters = workItem.getParameters();
+        parameters.put("someParam", "value");
+        // ... set up processInstance, node mocks as needed
+    }
+
+    @Test
+    void testHandler() {
+        WorkItemTransition transition = handler.startingTransition(parameters);
+        workItem.setPhaseStatus("Activated");
+        Optional<WorkItemTransition> result =
+            handler.activateWorkItemHandler(manager, handler, workItem, transition);
+        // assert result
+    }
+}
+```
+
+**Key classes used:**
+- `KogitoWorkItemImpl` — concrete class from `process-workitems`, instantiated directly (not mocked)
+- `KogitoWorkItemManager` — mocked via Mockito
+- `KogitoWorkItemHandler` — the handler under test (passed as both `handler` arg and caller)
+- `WorkItemTransition` — obtained from `handler.startingTransition()`
+
+**Pattern 2: Capture handler for process-level tests**
+
+Used by `TestWorkItemHandler` in `jbpm-tests`:
+
+```java
+// A simple test handler that captures activated work items
+public class TestWorkItemHandler extends DefaultKogitoWorkItemHandler {
+    private List<KogitoWorkItem> workItems = new ArrayList<>();
+
+    @Override
+    public Optional<WorkItemTransition> activateWorkItemHandler(
+            KogitoWorkItemManager manager, KogitoWorkItemHandler handler,
+            KogitoWorkItem workItem, WorkItemTransition transition) {
+        workItems.add(workItem);
+        return Optional.empty();  // don't auto-complete — let test drive
+    }
+
+    public KogitoWorkItem getWorkItem() { return workItems.get(0); }
+}
+```
+
+This handler is then registered with `ProcessTestHelper.registerHandler(app, "Human Task", handler)` and used to assert that the process engine dispatched the correct parameters.
+
+### 6.4 Test Pyramid by Module
 
 ```
                     ┌───────────────────────┐
                     │   E2E / Smoke Tests    │  ← anax-kogito-sample
-                    │   (full build + run)   │     bootRun + curl
+                    │   (full build + run)   │     bootRun + REST Assured
                     ├───────────────────────┤
                     │  Plugin Functional     │  ← anax-kogito-codegen-plugin
-                    │  (GradleRunner)        │     TestKit with sample projects
+                    │  (GradleRunner)        │     TestKit + WireMock
                     ├───────────────────────┤
                     │  Integration Tests     │  ← anax-kogito-spring-boot-starter
-                    │  (Spring Boot Test +   │     @SpringBootTest with Kogito
-                    │   Kogito Test Utils)   │     test runtime
+                    │  (@SpringBootTest)     │     auto-config wiring validation
                     ├───────────────────────┤
                     │  Unit Tests            │  ← all modules
                     │  (JUnit 5 + Mockito)   │     fast, no containers
                     └───────────────────────┘
 ```
 
-### 6.3 Module 1: `anax-kogito-codegen-extensions` — Tests
+### 6.5 Module 1: `anax-kogito-codegen-extensions` — Tests
 
-**Test scope:** Verify that each `FunctionTypeHandler` correctly parses URIs and emits the expected `WorkItemNode` parameters.
+**Test scope:** Verify that each `WorkItemTypeHandler` (`FunctionTypeHandler`) correctly parses URIs and emits the expected `WorkItemNode` parameters.
 
 **Framework:**
 ```gradle
 testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 testImplementation 'org.mockito:mockito-core:5.11.0'
+// Kogito codegen APIs needed to mock WorkItemNodeFactory, FunctionDefinition, ParserContext
 testImplementation "org.kie.kogito:kogito-serverless-workflow-builder:${kogitoVersion}"
 testImplementation "io.serverlessworkflow:serverlessworkflow-api:4.0.5.Final"
 ```
+
+**Test approach:** Our handlers extend `WorkItemTypeHandler`, which itself extends `WorkItemBuilder implements FunctionTypeHandler`. The key method is `fillWorkItemHandler(Workflow, ParserContext, WorkItemNodeFactory, FunctionDefinition)`. Tests mock the `WorkItemNodeFactory` and verify that `workName()` and `workParameter()` are called with expected values.
+
+This mirrors how Kogito registers built-in custom types. For reference, `JwtParserTypeHandler`, `CamelWorkItemTypeHandler`, and `DummyRPCCustomType` in the Kogito repo all follow this exact pattern:
+1. Override `fillWorkItemHandler()` → call `node.workName(NAME)` + `node.workParameter(key, value)`
+2. Override `type()` → return the scheme name
+3. Register via `META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler`
+
+The `FunctionTypeHandlerFactory` constructor loads handlers via `ServiceLoader` and routes based on `type()` + `isCustom()`.
 
 **Test cases:**
 
@@ -824,7 +911,7 @@ testImplementation "io.serverlessworkflow:serverlessworkflow-api:4.0.5.Final"
 |------------|------|----------|
 | `DmnFunctionTypeHandlerTest` | `type() returns "dmn"` | Scheme registration |
 | | `isCustom() returns true` | Custom function flag |
-| | `parses dmn://namespace/ModelName correctly` | URI parsing: namespace + modelName extraction |
+| | `parses dmn://namespace/ModelName correctly` | URI parsing via `trimCustomOperation()` |
 | | `parses dmn://deep.namespace/Model Name With Spaces` | Edge case: dots in namespace, spaces in name |
 | | `sets workName("dmn") and workParameters` | Codegen output: workName + DmnNamespace + ModelName params |
 | `AnaxFunctionTypeHandlerTest` | `parses anax://beanName/methodName` | URI parsing |
@@ -834,19 +921,32 @@ testImplementation "io.serverlessworkflow:serverlessworkflow-api:4.0.5.Final"
 | | `handles mappingName with hyphens and dots` | Edge case: `map://x9.field-mapping.v2` |
 | | `sets workName("map") and workParameter("MappingName")` | Codegen output |
 
-**Test approach:** Create a mock `FunctionDefinition` with the custom operation string, invoke `fillWorkItemHandler()`, and verify the factory's `workName()` and `workParameter()` calls.
+**Reference test:**
 
 ```java
 @Test
 void parseDmnUri() {
     DmnFunctionTypeHandler handler = new DmnFunctionTypeHandler();
+
+    // Verify type registration (used by FunctionTypeHandlerFactory)
+    assertThat(handler.type()).isEqualTo("dmn");
+    assertThat(handler.isCustom()).isTrue();
+
+    // Create a FunctionDefinition with custom operation
+    // Format: "dmn://com.anax.decisions/Order Type Routing"
+    // trimCustomOperation() strips the "dmn:" prefix → "//com.anax.decisions/Order Type Routing"
     FunctionDefinition fd = new FunctionDefinition("testFn")
         .withType(FunctionDefinition.Type.CUSTOM)
         .withOperation("dmn://com.anax.decisions/Order Type Routing");
 
-    WorkItemNodeFactory<?> factory = mock(WorkItemNodeFactory.class);
+    // Mock the WorkItemNodeFactory (fluent builder returned by each call)
+    @SuppressWarnings("unchecked")
+    WorkItemNodeFactory<RuleFlowNodeContainerFactory<?, ?>> factory = mock(WorkItemNodeFactory.class);
     when(factory.workName(any())).thenReturn(factory);
     when(factory.workParameter(any(), any())).thenReturn(factory);
+
+    Workflow workflow = mock(Workflow.class);
+    ParserContext parserContext = mock(ParserContext.class);
 
     handler.fillWorkItemHandler(workflow, parserContext, factory, fd);
 
@@ -856,7 +956,7 @@ void parseDmnUri() {
 }
 ```
 
-### 6.4 Module 2: `anax-kogito-spring-boot-starter` — Tests
+### 6.6 Module 2: `anax-kogito-spring-boot-starter` — Tests
 
 **Test scope:** Verify handlers execute correctly given work-item parameters, and auto-configuration wires beans properly.
 
@@ -866,15 +966,77 @@ testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 testImplementation 'org.mockito:mockito-core:5.11.0'
 testImplementation 'org.springframework.boot:spring-boot-starter-test'
 
-// Kogito test utilities — provides test process engine and work-item test harness
-testImplementation "org.kie.kogito:kogito-spring-boot-starter-test:${kogitoVersion}"
+// Kogito classes needed for handler unit tests — NOT a test harness
 testImplementation "org.kie.kogito:kogito-api:${kogitoVersion}"
+testImplementation "org.kie.kogito:jbpm-process-workitems:${kogitoVersion}"  // KogitoWorkItemImpl, DefaultKogitoWorkItemHandler
 ```
 
-**`kogito-spring-boot-starter-test` provides:**
-- `KogitoSpringbootApplication` — test-scoped Spring Boot app with Kogito auto-configuration
-- Work-item handler test infrastructure
-- In-memory process engine for integration tests
+**Why no `kogito-test-utils`?** That artifact provides only Testcontainers wrappers (Infinispan, Kafka, Keycloak, MongoDB, PostgreSQL, Redis). Our handlers don't need infrastructure containers. We test handlers directly using the same pattern as Kogito's `RestWorkItemHandlerTest`.
+
+**Work-item handler test pattern (all three handlers):**
+
+```java
+@ExtendWith(MockitoExtension.class)
+class AnaxWorkItemHandlerTest {
+
+    @Mock KogitoWorkItemManager manager;
+    @Mock ApplicationContext applicationContext;
+
+    private AnaxWorkItemHandler handler;
+
+    @BeforeEach
+    void setUp() {
+        handler = new AnaxWorkItemHandler(applicationContext);
+    }
+
+    @Test
+    void invokesNamedBeanMethod() {
+        // Arrange: create a real KogitoWorkItemImpl with parameters
+        KogitoWorkItemImpl workItem = new KogitoWorkItemImpl();
+        workItem.setId("1");
+        workItem.setParameter("BeanName", "greetingService");
+        workItem.setParameter("MethodName", "greet");
+
+        GreetingService mockBean = mock(GreetingService.class);
+        when(mockBean.greet(any())).thenReturn(Map.of("greeting", "Hello!"));
+        when(applicationContext.getBean("greetingService")).thenReturn(mockBean);
+
+        // Act: invoke the handler directly (Kogito's proven test pattern)
+        WorkItemTransition transition = handler.startingTransition(
+            workItem.getParameters());
+        workItem.setPhaseStatus("Activated");
+        Optional<WorkItemTransition> result =
+            handler.activateWorkItemHandler(manager, handler, workItem, transition);
+
+        // Assert
+        assertThat(result).isPresent();
+        assertThat(result.get().data()).containsEntry("Result",
+            Map.of("greeting", "Hello!"));
+    }
+
+    @Test
+    void defaultsToExecuteMethod() {
+        KogitoWorkItemImpl workItem = new KogitoWorkItemImpl();
+        workItem.setId("2");
+        workItem.setParameter("BeanName", "myService");
+        // No MethodName → defaults to "execute"
+        // ... assert "execute" is invoked
+    }
+
+    @Test
+    void throwsForMissingBean() {
+        KogitoWorkItemImpl workItem = new KogitoWorkItemImpl();
+        workItem.setId("3");
+        workItem.setParameter("BeanName", "nonexistent");
+        when(applicationContext.getBean("nonexistent"))
+            .thenThrow(new NoSuchBeanDefinitionException("nonexistent"));
+
+        assertThatThrownBy(() -> handler.activateWorkItemHandler(
+            manager, handler, workItem, handler.startingTransition(workItem.getParameters())
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+}
+```
 
 **Test cases:**
 
@@ -897,34 +1059,7 @@ testImplementation "org.kie.kogito:kogito-api:${kogitoVersion}"
 | | `GET /anax/catalog/schemes returns scheme list` | `@WebMvcTest` |
 | | `catalog disabled via anax.catalog.enabled=false` | `@SpringBootTest` with properties |
 
-**Integration test with Kogito runtime:**
-
-```java
-@SpringBootTest
-@Import(TestWorkflowConfiguration.class)
-class WorkflowIntegrationTest {
-
-    @Autowired
-    ProcessService processService;  // Kogito process engine
-
-    @Test
-    void anaxHandlerInvokedDuringWorkflowExecution() {
-        // Given: a workflow with anax://greetingService/greet
-        Map<String, Object> input = Map.of("name", "World");
-
-        // When: start the process
-        ProcessInstance<?> pi = processService.createProcessInstance(
-            "hello-world", input);
-        processService.startProcessInstance(pi.id());
-
-        // Then: the greeting was added to workflow data
-        Map<String, Object> vars = pi.variables();
-        assertEquals("Hello, World!", vars.get("greeting"));
-    }
-}
-```
-
-### 6.5 Module 3: `anax-kogito-codegen-plugin` — Tests
+### 6.7 Module 3: `anax-kogito-codegen-plugin` — Tests
 
 **Test scope:** Verify the Gradle plugin configures tasks correctly, resolves assets from the metadata server, and runs Kogito codegen.
 
@@ -1043,15 +1178,15 @@ testProjectDir/
     └── test-workflow.sw.json  (references dmn:// and map:// URIs)
 ```
 
-### 6.6 Module 4: `anax-kogito-sample` — E2E Tests
+### 6.8 Module 4: `anax-kogito-sample` — E2E Tests
 
 **Test scope:** Full build-and-run smoke test. Verifies the entire pipeline from `.sw.json` → codegen → runtime.
 
 **Framework:**
 ```gradle
 testImplementation 'org.springframework.boot:spring-boot-starter-test'
-testImplementation "org.kie.kogito:kogito-spring-boot-starter-test:${kogitoVersion}"
 testImplementation 'io.rest-assured:rest-assured:5.4.0'
+// No special Kogito test dependency — the starter auto-configures the runtime
 ```
 
 **Test cases:**
@@ -1063,32 +1198,69 @@ testImplementation 'io.rest-assured:rest-assured:5.4.0'
 | `GET /anax/catalog/dmn returns resolved DMN models` | DMN resolution → catalog pipeline |
 | Application starts without errors | Auto-configuration wiring |
 
-### 6.7 Test Dependencies Summary
+### 6.9 Test Dependencies Summary
 
-| Module | JUnit 5 | Mockito | Spring Boot Test | Kogito Test | Gradle TestKit | WireMock | REST Assured |
-|--------|---------|---------|------------------|-------------|----------------|----------|--------------|
-| codegen-extensions | ✓ | ✓ | | ✓ (codegen API) | | | |
-| spring-boot-starter | ✓ | ✓ | ✓ | ✓ | | | |
+| Module | JUnit 5 | Mockito | Spring Boot Test | Kogito (compile/test) | Gradle TestKit | WireMock | REST Assured |
+|--------|---------|---------|------------------|----------------------|----------------|----------|--------------|
+| codegen-extensions | ✓ | ✓ | | `kogito-serverless-workflow-builder`, `serverlessworkflow-api` | | | |
+| spring-boot-starter | ✓ | ✓ | ✓ | `kogito-api`, `jbpm-process-workitems` | | | |
 | codegen-plugin | ✓ | ✓ | | | ✓ | ✓ | |
-| sample | ✓ | | ✓ | ✓ | | | ✓ |
+| sample | ✓ | | ✓ | (via starter transitively) | | | ✓ |
 
-### 6.8 Kogito Test Utilities Reference
+### 6.10 Kogito Test Utilities Reference — Verified Findings
 
-Key Kogito test artifacts:
+Based on research of the `incubator-kie-kogito-runtimes` repository (`main` branch, reflecting Kogito 10.x+):
 
-| Artifact | Purpose |
-|----------|---------|
-| `org.kie.kogito:kogito-spring-boot-starter-test` | Spring Boot test autoconfiguration for Kogito process engine |
-| `org.kie.kogito:kogito-test-utils` | Low-level test utilities: in-memory process engine, mock work items |
-| `org.kie.kogito:kogito-api` (test scope) | `ProcessInstance`, `ProcessService`, `WorkItem` interfaces |
-| `org.jbpm:jbpm-flow` (test scope) | `DefaultWorkItemHandlerConfig` for test handler registration |
+#### What `kogito-test-utils` actually contains
 
-**Note:** The exact test artifact availability for Kogito 10.1.0 should be verified against the Maven repository. The `10.1.x` branch of `incubator-kie-kogito-runtimes` is the authoritative source for test infrastructure.
+`kogito-test-utils` (`org.kie.kogito:kogito-test-utils`) is **exclusively** Testcontainers infrastructure:
 
-### 6.9 CI Pipeline Integration
+| Class | Purpose |
+|-------|---------|
+| `KogitoGenericContainer` | Base Testcontainers wrapper |
+| `KogitoInfinispanContainer` | Testcontainers Infinispan |
+| `KogitoKafkaContainer` | Testcontainers Kafka (Redpanda) |
+| `KogitoKeycloakContainer` | Testcontainers Keycloak |
+| `KogitoMongoDBContainer` | Testcontainers MongoDB |
+| `KogitoPostgreSqlContainer` | Testcontainers PostgreSQL |
+| `KogitoRedisSearchContainer` | Testcontainers Redis |
+| `KogitoImageNameSubstitutor` | Docker image name resolution |
+| `Constants` | Container start timeout, image prefix |
+
+The Spring Boot wrappers in `springboot/test/` (e.g., `InfinispanSpringBootTestResource`, `KafkaSpringBootTestResource`) wrap these Testcontainers for Spring's `ApplicationContextInitializer` lifecycle.
+
+**None of these are relevant for testing work-item handlers or codegen extensions.**
+
+#### What we actually use from Kogito (for tests)
+
+| Artifact | Class | How We Use It |
+|----------|-------|---------------|
+| `kogito-api` | `KogitoWorkItem` (interface) | Type reference in handler method signatures |
+| `kogito-api` | `KogitoWorkItemHandler` (interface) | Handler interface with `activateWorkItemHandler()` |
+| `kogito-api` | `KogitoWorkItemManager` (interface) | Mocked in tests |
+| `kogito-api` | `WorkItemTransition` (interface) | Return type from handler activation |
+| `jbpm-process-workitems` | `KogitoWorkItemImpl` | **Instantiated directly** in tests (not mocked) — provides `setParameter()`, `setId()`, `getParameters()` |
+| `jbpm-process-workitems` | `DefaultKogitoWorkItemHandler` | Base class our handlers extend — provides `startingTransition()`, lifecycle wiring |
+| `kogito-serverless-workflow-builder` | `WorkItemTypeHandler` | Base class our codegen handlers extend |
+| `kogito-serverless-workflow-builder` | `FunctionTypeHandler` | SPI interface (loaded by `ServiceLoader`) |
+| `kogito-serverless-workflow-builder` | `FunctionTypeHandlerFactory` | Provides `trimCustomOperation(FunctionDefinition)` |
+
+#### Test doubles we build ourselves
+
+Kogito does **not** provide reusable test doubles. Each Kogito test module defines its own. We follow suit:
+
+| Test Double | Purpose | Where Used |
+|-------------|---------|------------|
+| `StubMetadataServerClient` | In-memory metadata server (§4.5) | Plugin unit tests, plugin functional tests |
+| Mock `KogitoWorkItemManager` | Mockito mock of the manager interface | Handler unit tests |
+| Mock `ApplicationContext` | Mockito mock of Spring context | `AnaxWorkItemHandler` tests |
+| Mock `DecisionModels` | Mockito mock of Kogito DMN API | `DmnWorkItemHandler` tests |
+| Mock `WorkItemNodeFactory` | Mockito mock of the codegen factory | `FunctionTypeHandler` tests |
+
+### 6.11 CI Pipeline Integration
 
 ```yaml
-# Suggested GitHub Actions test matrix
+# GitHub Actions test workflow
 test:
   strategy:
     matrix:

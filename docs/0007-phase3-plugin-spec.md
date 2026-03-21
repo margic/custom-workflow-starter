@@ -20,6 +20,27 @@ It also includes a **comprehensive test strategy** covering all four modules.
 
 ---
 
+## 1.1 Governance Asset Lifecycle
+
+The metadata server is a **governance asset store**. The lifecycle is:
+
+```
+1. Author creates a governance resource (DMN model, Jolt mapping spec, etc.)
+2. Author publishes the resource to the metadata server (out of band / out of scope)
+   └── The metadata server stores the ORIGINAL artifact (e.g., raw .dmn XML file)
+   └── The metadata server may also parse it for display/search (JSON representation)
+3. Workflow developer references the resource via custom URI in .sw.json:
+   └── "operation": "dmn://com.anax.decisions/Order Type Routing"
+4. At build time, the Gradle plugin fetches the ORIGINAL artifact from the metadata server
+   └── Kogito codegen needs actual DMN XML — the JSON representation is not sufficient
+5. Kogito codegen processes the .dmn file alongside the .sw.json
+6. At runtime, the generated process evaluates the DMN model in-process
+```
+
+This is an iterative cycle: new governance resources are developed, published to the metadata server, then consumed by future workflows — including workflows that call other workflows. Publishing to the metadata server is **out of scope** for this project; consumption at build time is in scope.
+
+---
+
 ## 2. URI Resolution Schema
 
 ### 2.1 URI Grammar
@@ -61,17 +82,7 @@ API call: GET {metadataServerUrl}/api/decisions?namespace={namespace}&name={mode
 Output:  DMN XML → build/generated/resources/kogito/{slugified-modelName}.dmn
 ```
 
-**Critical gap identified:** The current metadata server API (`GET /api/decisions/:decisionId`) returns a **JSON decision table representation**, NOT raw DMN XML. Kogito codegen requires actual DMN XML files as input.
-
-**Resolution options (choose one):**
-
-| Option | Description | Impact |
-|--------|-------------|--------|
-| **A. DMN export endpoint** | Add `GET /api/decisions/:decisionId/export?format=dmn` to the metadata server that returns raw DMN XML | Requires metadata server change; clean separation |
-| **B. Client-side DMN generation** | The Gradle plugin generates DMN XML from the JSON decision table definition | Complex; fragile; duplicates DMN authoring logic |
-| **C. Store DMN XML as attachment** | Metadata server stores the original `.dmn` file as a binary attachment alongside the parsed definition | Simplest; metadata server becomes a file store for DMN |
-
-**Recommendation: Option A** — Add an export endpoint. The metadata server already parses DMN for display; generating XML from its internal model is the server's responsibility. Option C is acceptable as a first iteration.
+**DECIDED:** The metadata server stores the **original DMN XML file** as uploaded by the author. The plugin fetches this raw `.dmn` file — Kogito codegen requires actual DMN XML, not the JSON representation the server may also provide for UI/search purposes. The metadata server API must serve the original artifact via an export endpoint (e.g., `GET /api/decisions/:decisionId/export?format=dmn`) or a dedicated download path. The JSON representation is irrelevant to the build plugin.
 
 #### `map://{mappingName}`
 
@@ -91,17 +102,9 @@ API call: GET {metadataServerUrl}/api/mappings/{mappingId}
 Output:  Jolt spec JSON → build/generated/resources/kogito/META-INF/anax/mappings/{mappingName}.json
 ```
 
-**Critical gap identified:** The current metadata server API returns a **field-level mapping representation** with custom transform expressions (e.g., `parseNumber`, `parseDate`), NOT a Jolt spec. The `MapWorkItemHandler` expects a Jolt-compatible JSON spec.
+**Same principle as DMN:** The metadata server stores the **original Jolt spec JSON** as uploaded by the author. The plugin fetches this raw spec file. The metadata server may also provide a parsed/structured representation for its UI, but the plugin needs the original artifact.
 
-**Resolution options (choose one):**
-
-| Option | Description | Impact |
-|--------|-------------|--------|
-| **A. Jolt export endpoint** | Add `GET /api/mappings/:mappingId/export?format=jolt` that converts the field mapping to Jolt chainr spec | Requires metadata server change; server owns the format translation |
-| **B. Client-side Jolt generation** | The Gradle plugin converts the field-mapping JSON to Jolt spec during `resolveGovernanceAssets` | Plugin owns the translation; mapping format becomes a build concern |
-| **C. Store Jolt spec directly** | Metadata server stores a raw Jolt spec JSON alongside the field mapping | Requires Jolt authoring in the metadata server UI; most flexible |
-
-**Recommendation: Option B for now** — The plugin converts at build time. The field-mapping format from the metadata server is well-defined, and the Jolt conversion is deterministic. The `MapWorkItemHandler` is a stub anyway — the Jolt engine comes later. For now, the plugin can write the raw field-mapping JSON and the handler passes data through unchanged.
+For now, the `MapWorkItemHandler` is a stub (passes data through). The Jolt engine is wired in a later iteration. The plugin still fetches and writes the spec to the classpath at build time — this validates that the asset exists and is accessible.
 
 #### `anax://{beanName}/{methodName}`
 
@@ -501,15 +504,16 @@ public class HttpMetadataServerClient implements MetadataServerClient {
 
     @Override
     public Optional<ResolvedDecision> fetchDecision(String decisionId) {
+        // Fetch raw DMN XML via export endpoint
         String url = baseUrl + "/api/decisions/"
-            + URI.create("").resolve(decisionId).toString();
+            + URI.create("").resolve(decisionId).toString()
+            + "/export?format=dmn";
         HttpResponse<String> response = doGet(url);
 
         if (response.statusCode() == 404) return Optional.empty();
         validateResponse(response, url);
 
-        // Parse JSON response and extract DMN content
-        // (Implementation depends on resolution of §2.2 Option A/B/C)
+        // Response body is raw DMN XML — pass through to ResolvedDecision
         return Optional.of(parseDecisionResponse(response.body()));
     }
 
@@ -532,8 +536,10 @@ public class HttpMetadataServerClient implements MetadataServerClient {
 
     @Override
     public Optional<ResolvedMapping> fetchMapping(String mappingId) {
+        // Fetch raw Jolt spec via export endpoint
         String url = baseUrl + "/api/mappings/"
-            + URI.create("").resolve(mappingId).toString();
+            + URI.create("").resolve(mappingId).toString()
+            + "/export?format=jolt";
         HttpResponse<String> response = doGet(url);
 
         if (response.statusCode() == 404) return Optional.empty();
@@ -685,31 +691,13 @@ anaxKogito {
 
 ## 5. Open Questions Requiring Decision
 
-These must be resolved before Phase 3 implementation begins:
+### ~~Q1: DMN Artifact Format~~ — RESOLVED
 
-### Q1: DMN Artifact Format
+**Decision:** The metadata server stores the **original DMN XML file** as uploaded by the author and serves it via an export/download endpoint. The JSON decision table representation is for the server's UI only. The plugin fetches raw DMN XML. See §1.1 and §2.2.
 
-The metadata server returns decisions as JSON decision tables. Kogito codegen requires DMN XML.
+### ~~Q2: Mapping Artifact Format~~ — RESOLVED
 
-| Option | Description | Who Changes | Effort |
-|--------|-------------|-------------|--------|
-| **A. Export endpoint** | `GET /api/decisions/:id/export?format=dmn` returns DMN XML | Metadata server team | Medium — server generates DMN XML from internal model |
-| **B. Store DMN as attachment** | Metadata server stores the original uploaded `.dmn` file and serves it as-is | Metadata server team | Low — add binary storage column |
-| **C. Plugin generates DMN** | Gradle plugin converts JSON decision table → DMN XML | Starter team | High — fragile, duplicates server logic |
-
-**Recommendation: B** (lowest risk for first iteration). When authors upload a DMN file to the metadata server, it stores the original XML. The export endpoint returns the stored XML. The JSON representation is for the UI only.
-
-### Q2: Mapping Artifact Format
-
-The metadata server returns mappings as field-level JSON (source/target/transform). The `MapWorkItemHandler` is a stub that passes data through. When the Jolt engine is wired later, it needs a Jolt-compatible spec.
-
-| Option | Description | Who Changes | Effort |
-|--------|-------------|-------------|--------|
-| **A. Jolt export endpoint** | Server converts field mapping → Jolt chainr spec | Metadata server team | Medium |
-| **B. Plugin converts** | Gradle plugin converts field mapping → Jolt spec at build time | Starter team | Medium |
-| **C. Pass through raw JSON** | Write field-mapping JSON as-is; handler stub ignores format | Nobody (for now) | Zero |
-
-**Recommendation: C** (for now). The handler is a stub. When the Jolt engine is implemented, revisit with Option A or B. The field-mapping JSON is written to the classpath as the "spec" — the format translation becomes relevant only when the Jolt engine is active.
+**Decision:** Same pattern as DMN. The metadata server stores the **original Jolt spec JSON** as uploaded by the author and serves it via an export/download endpoint. The handler is a stub for now; the Jolt engine comes later. See §2.2.
 
 ### Q3: Decision ID Resolution Strategy
 
@@ -1107,9 +1095,10 @@ Endpoints consumed by the Gradle plugin at build time:
 | Endpoint | Method | Purpose | Response |
 |----------|--------|---------|----------|
 | `/api/decisions?namespace={ns}&name={name}&status=active` | GET | Find decision by namespace + name | Array of decision objects |
-| `/api/decisions/{decisionId}` | GET | Fetch decision by ID | Decision object with `definition` |
-| `/api/decisions/{decisionId}/export?format=dmn` | GET | **NEW (proposed)** — Export DMN XML | Raw DMN XML |
-| `/api/mappings/{mappingId}` | GET | Fetch mapping by ID | Mapping object with `fields[]` |
+| `/api/decisions/{decisionId}` | GET | Fetch decision metadata | Decision object with `definition` |
+| `/api/decisions/{decisionId}/export?format=dmn` | GET | **Required** — Download original DMN XML | Raw DMN XML (`application/xml`) |
+| `/api/mappings/{mappingId}` | GET | Fetch mapping metadata | Mapping object with `fields[]` |
+| `/api/mappings/{mappingId}/export?format=jolt` | GET | **Required** — Download original Jolt spec | Raw Jolt spec (`application/json`) |
 | `/health` | HEAD | Health check | 200 if healthy |
 
 **Authentication:** None (PoC scope). Future: Azure AD OAuth2 bearer tokens.

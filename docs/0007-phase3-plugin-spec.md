@@ -736,6 +736,118 @@ anaxKogito {
 }
 ```
 
+### 4.7 MCP Configuration Generation
+
+The metadata server exposes an MCP (Model Context Protocol) endpoint at `/mcp/sse` that enables GitHub Copilot Agent Mode to discover and invoke governance asset tools (list, create, validate). Since `.vscode/mcp.json` is a workspace-level IDE config file — not a runtime resource — it cannot be delivered via the Spring Boot starter JAR. The Gradle plugin generates it instead.
+
+#### Task: `generateMcpConfig`
+
+Generates `.vscode/mcp.json` in the consuming project's root directory if the file does not already exist. This enables Copilot Agent Mode to connect to the metadata server's MCP endpoint without manual configuration.
+
+**Behavior:**
+- Writes `.vscode/mcp.json` only if the file is **absent** — never overwrites an existing file
+- Uses the same `metadataServerUrl` from the `anaxKogito` extension configuration
+- Runs as part of the build lifecycle (after `resolveGovernanceAssets`)
+- Skipped when `metadataServerUrl` is `stub` (offline/test builds have no MCP server)
+
+**Generated file:**
+
+```json
+{
+  "servers": {
+    "anax-metadata": {
+      "type": "sse",
+      "url": "${metadataServerUrl}/mcp/sse"
+    }
+  }
+}
+```
+
+For example, with `anaxKogito.metadataServerUrl = 'http://localhost:3001'`, the generated file is:
+
+```json
+{
+  "servers": {
+    "anax-metadata": {
+      "type": "sse",
+      "url": "http://localhost:3001/mcp/sse"
+    }
+  }
+}
+```
+
+**Extension configuration:**
+
+```gradle
+anaxKogito {
+    metadataServerUrl = 'http://localhost:3001'  // also used for MCP config
+}
+```
+
+**Task implementation sketch:**
+
+```java
+package com.anax.kogito.gradle;
+
+import org.gradle.api.DefaultTask;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.OutputFile;
+import org.gradle.api.tasks.TaskAction;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+
+public abstract class GenerateMcpConfigTask extends DefaultTask {
+
+    @Input
+    public abstract org.gradle.api.provider.Property<String> getMetadataServerUrl();
+
+    @OutputFile
+    public File getOutputFile() {
+        return getProject().file(".vscode/mcp.json");
+    }
+
+    @TaskAction
+    public void generate() throws IOException {
+        String url = getMetadataServerUrl().get();
+        if ("stub".equalsIgnoreCase(url)) {
+            getLogger().lifecycle("Skipping MCP config generation (stub mode)");
+            return;
+        }
+
+        File output = getOutputFile();
+        if (output.exists()) {
+            getLogger().lifecycle("Skipping MCP config generation ({} already exists)",
+                output.getPath());
+            return;
+        }
+
+        String mcpUrl = url.endsWith("/")
+            ? url + "mcp/sse"
+            : url + "/mcp/sse";
+
+        String content = "{\n"
+            + "  \"servers\": {\n"
+            + "    \"anax-metadata\": {\n"
+            + "      \"type\": \"sse\",\n"
+            + "      \"url\": \"" + mcpUrl + "\"\n"
+            + "    }\n"
+            + "  }\n"
+            + "}\n";
+
+        Files.createDirectories(output.getParentFile().toPath());
+        Files.writeString(output.toPath(), content);
+        getLogger().lifecycle("Generated {}", output.getPath());
+    }
+}
+```
+
+**Why generate-if-absent (not always overwrite)?**
+- Consumers may customize `mcp.json` with additional servers or authentication
+- Source-controlled files should not be silently overwritten by build tasks
+- First build bootstraps the file; subsequent builds leave it alone
+
 ---
 
 ## 5. Open Questions Requiring Decision
@@ -1419,6 +1531,11 @@ generateAnaxCatalog
     ▼
 compileJava ← depends on generateKogitoSources, generateAnaxCatalog
 processResources ← depends on generateKogitoSources, generateAnaxCatalog
+
+generateMcpConfig (runs in parallel, after resolveGovernanceAssets)
+    │ inputs: anaxKogito.metadataServerUrl
+    │ outputs: .vscode/mcp.json (only if absent)
+    │ skipped when: metadataServerUrl == 'stub' OR file already exists
 ```
 
 ---
@@ -1438,7 +1555,8 @@ Phase 3 implementation should proceed in this order:
 - [ ] **3.9** `ResolveGovernanceAssetsTask` + functional tests (GradleRunner + WireMock)
 - [ ] **3.10** `AnaxKogitoCodegenPlugin` (classpath assembly, reflective invocation) + functional tests
 - [ ] **3.11** `CatalogManifestTask` + tests
-- [ ] **3.12** Integration: wire all tasks, verify full `build` lifecycle
+- [ ] **3.12** `GenerateMcpConfigTask` + tests (generate `.vscode/mcp.json` from `metadataServerUrl`)
+- [ ] **3.13** Integration: wire all tasks, verify full `build` lifecycle
 
 ---
 

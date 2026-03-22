@@ -9,7 +9,7 @@ services:
       - redpanda
 
   metadata-platform:
-    image: margic/anax-metadata-platform:latest
+    image: margic/anax-metadata-platform:v0.3.1
     ports:
       - "3001:3001"
 
@@ -29,15 +29,16 @@ services:
       - "19092:19092"  # Kafka API (external/host)
       - "18081:18081"  # Schema Registry
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "internal://localhost:9644"]
+      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "http://localhost:9644"]
+      start_period: 30s
       interval: 10s
       timeout: 5s
       retries: 5
 
   redpanda-console:
     image: docker.redpanda.com/redpandadata/console:v2.6.0
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     environment:
       CONFIG_FILEPATH: /tmp/config.yml
       CONSOLE_CONFIG_FILE: |

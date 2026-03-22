@@ -3,7 +3,7 @@
 **Target Audience:** Engineering Team & GitHub Copilot Agent  
 **Objective:** Build a metadata management platform that serves as the authoring, cataloging, and operational inspection layer for **Governance Assets** — the versionable metadata artifacts (models, workflows, decisions, mappings) that define how legal orders and subpoenas are processed through CNCF Serverless Workflow automation pipelines — with rich, context-aware editors and a unified canonical model that drives both validation and UI rendering.  
 **Environment:** Single Devcontainer / GitHub Codespaces  
-**Revision:** v2 (2026-03-05)
+**Revision:** v3 (2026-03-21)
 
 ---
 
@@ -125,8 +125,8 @@ The platform manages four types of **Governance Assets** — versionable, querya
 |---|---|---|---|
 | **Canonical Model** | Data structure, validation rules, and form rendering for an order type | JSON Schema (draft-07) + JSON Forms UI Schema | X9.129 Legal Order Header (RT 20) |
 | **Workflow Definition** | The process steps that transform an order from receipt to completion | CNCF Serverless Workflow (`sw.json`, spec v0.8) | `process-legal-order` |
-| **Decision Table** | Business rules that determine routing, priority, and exception handling | DMN (Decision Model and Notation) in JSON representation | `legal-order-routing` |
-| **Transformation Mapping** | How inbound document formats map to canonical model fields | Source→target field mapping with transform functions | `PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1` |
+| **Decision Table** | Business rules that determine routing, priority, and exception handling | DMN (Decision Model and Notation) — stored as DMN XML in `sourceContent` with parsed inputs/outputs/rules for the editor and evaluator | `legal-order-routing` |
+| **Transformation Mapping** | How inbound document formats map to canonical model fields | Jolt transformation specifications with jurisdiction-specific overrides and test fixtures | `pdf-extract-to-legal-order` |
 
 **Why "Governance Assets":**
 - They **govern** how every legal order and subpoena flows through the system
@@ -552,100 +552,214 @@ DMN (Decision Model and Notation) is the standard for expressing business rules 
 
 **Why DMN rather than jq `dataConditions`:** A `switch` state in CNCF SW can express routing logic directly as jq expressions — no external service required. DMN is chosen here because routing rules are authored and owned by **compliance and operations teams**, not developers. A compliance analyst can read, test, and change a decision table in the Decision Editor without opening a workflow JSON file or triggering a workflow redeployment cycle. The rules are also auditable as standalone governance assets: an auditor inspecting a processed order can identify the exact decision table and rule version that governed the routing. For the full rationale see Section 15.4.
 
+Decisions are stored with the original DMN XML in `sourceContent` alongside a parsed representation used by the editor and evaluator. The top-level fields (`hitPolicy`, `inputs[]`, `outputs[]`, `rules[]`) are extracted from the DMN XML and maintained in parallel to enable the spreadsheet-like decision table UI without requiring a full DMN parser on the client.
+
 ```json
 {
   "decisionId": "legal-order-routing",
-  "name": "Legal Order Routing Rules",
+  "name": "Legal Order Routing",
+  "namespace": "com.anax.decisions",
   "version": "1.0.0",
   "status": "active",
-  "tags": ["x9.129", "legal-order", "routing"],
-  "createdAt": "2025-06-15T00:00:00Z",
-  "updatedAt": "2025-06-15T00:00:00Z",
+  "description": "Routes incoming legal orders to the appropriate processing path based on order type, amount, and jurisdiction.",
 
-  "definition": {
-    "hitPolicy": "FIRST",
-    "inputs": [
-      { "id": "orderAmount", "label": "Order Amount", "type": "number" },
-      { "id": "jurisdictionCode", "label": "Jurisdiction", "type": "string" },
-      { "id": "orderTypeCode", "label": "Order Type", "type": "string" }
-    ],
-    "outputs": [
-      { "id": "requiresReview", "label": "Requires Manual Review", "type": "boolean" },
-      { "id": "priority", "label": "Priority", "type": "string" },
-      { "id": "assignee", "label": "Assign To", "type": "string" }
-    ],
-    "rules": [
-      {
-        "description": "High-value orders require manual review",
-        "conditions": { "orderAmount": "> 50000" },
-        "outputs": { "requiresReview": true, "priority": "high", "assignee": "senior-reviewer" }
-      },
-      {
-        "description": "Multi-state orders require compliance review",
-        "conditions": { "jurisdictionCode": "MULTI" },
-        "outputs": { "requiresReview": true, "priority": "medium", "assignee": "compliance-team" }
-      },
-      {
-        "description": "Government entities fast-tracked",
-        "conditions": { "orderTypeCode": "COURT_ORDER" },
-        "outputs": { "requiresReview": false, "priority": "low", "assignee": "auto" }
-      },
-      {
-        "description": "Default: auto-approve",
-        "conditions": {},
-        "outputs": { "requiresReview": false, "priority": "normal", "assignee": "auto" }
-      }
-    ]
-  },
+  "sourceContent": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>...(DMN XML)...",
+
+  "hitPolicy": "FIRST",
+  "inputs": [
+    {
+      "name": "orderTypeCode",
+      "label": "Order Type",
+      "type": "string",
+      "description": "The type code of the legal order",
+      "linkedModel": "X9_129_LEGAL_ORDER_HEADER_V1",
+      "linkedField": "orderTypeCode"
+    },
+    {
+      "name": "totalAmount",
+      "label": "Total Amount",
+      "type": "number",
+      "description": "Total monetary amount of the legal order",
+      "linkedModel": "X9_129_AMOUNT_DETAIL_V1",
+      "linkedField": "totalAmount"
+    },
+    {
+      "name": "jurisdictionCode",
+      "label": "Jurisdiction",
+      "type": "string",
+      "description": "Jurisdiction code where the order was issued",
+      "linkedModel": "X9_129_LEGAL_ORDER_HEADER_V1",
+      "linkedField": "jurisdictionCode"
+    }
+  ],
+  "outputs": [
+    { "name": "requiresManualReview", "label": "Requires Manual Review", "type": "boolean" },
+    { "name": "routingQueue", "label": "Routing Queue", "type": "string" },
+    { "name": "priority", "label": "Priority", "type": "string" }
+  ],
+  "rules": [
+    {
+      "id": 1,
+      "description": "High-value garnishments require manual review",
+      "conditions": { "orderTypeCode": "GARNISHMENT", "totalAmount": "> 50000", "jurisdictionCode": "-" },
+      "results": { "requiresManualReview": true, "routingQueue": "legal-order-review", "priority": "high" }
+    },
+    {
+      "id": 2,
+      "description": "All levies require manual review",
+      "conditions": { "orderTypeCode": "LEVY", "totalAmount": "-", "jurisdictionCode": "-" },
+      "results": { "requiresManualReview": true, "routingQueue": "legal-order-review", "priority": "urgent" }
+    },
+    {
+      "id": 3,
+      "description": "California orders have special handling",
+      "conditions": { "orderTypeCode": "-", "totalAmount": "-", "jurisdictionCode": "CA" },
+      "results": { "requiresManualReview": true, "routingQueue": "ca-legal-review", "priority": "normal" }
+    },
+    {
+      "id": 4,
+      "description": "Low-value garnishments auto-approve",
+      "conditions": { "orderTypeCode": "GARNISHMENT", "totalAmount": "<= 50000", "jurisdictionCode": "-" },
+      "results": { "requiresManualReview": false, "routingQueue": "auto-process", "priority": "normal" }
+    },
+    {
+      "id": 5,
+      "description": "Default: route to manual review",
+      "conditions": { "orderTypeCode": "-", "totalAmount": "-", "jurisdictionCode": "-" },
+      "results": { "requiresManualReview": true, "routingQueue": "legal-order-review", "priority": "normal" }
+    }
+  ],
 
   "metadata": {
-    "relatedModels": ["X9_129_LEGAL_ORDER_HEADER_V1"],
+    "tags": ["routing", "legal-order", "x9-129", "processing"],
+    "relatedModels": ["X9_129_LEGAL_ORDER_HEADER_V1", "X9_129_AMOUNT_DETAIL_V1"],
     "relatedWorkflows": ["process-legal-order"]
   }
 }
 ```
 
-**How DMN fits the workflow:** The `sw.json` workflow calls `evaluateRoutingDecision` which hits the metadata server's `/api/decisions/:id/evaluate` endpoint. The server loads the decision, evaluates the rules against the input data, and returns the output. The workflow uses the output to branch (`switch` state).
+**Key differences from a pure-DMN store:**
+- **`sourceContent`** — The full DMN XML is preserved for round-trip fidelity and export (`GET /api/decisions/:id/export`).
+- **`inputs[].linkedModel` / `linkedField`** — Each input can be traced back to a specific canonical model field, enabling the Decision Editor to auto-suggest fields when a model is linked.
+- **`rules[].conditions` / `results`** — Conditions use `-` for "any value" (DMN convention). Results use field names matching `outputs[].name`.
+- **`namespace`** — DMN namespace, e.g., `com.anax.decisions`.
 
-### 4.4 Transformation Mapping
+**How DMN fits the workflow:** The `sw.json` workflow calls `evaluateRoutingDecision` which invokes the decision evaluation logic. The server loads the decision, evaluates the rules against the input data by hit policy, and returns the matching rule and outputs.
 
-Maps inbound document formats to canonical models:
+**Current PoC status:** The `/api/decisions/:id/evaluate` endpoint is specified as a future integration point. The current implementation provides `POST /api/decisions/:id/validate` for structural validation of the decision table. Full DMN evaluation as a service is a planned enhancement (see §14).
+
+### 4.4 Transformation Mapping (Jolt)
+
+Maps inbound document formats to canonical models using **Jolt transformation specifications**. Jolt is a JSON-to-JSON transform library that uses a declarative spec to describe how input JSON should be restructured. This replaces the earlier field-by-field mapping approach with a more powerful, industry-standard transformation engine.
 
 ```json
 {
-  "mappingId": "PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1",
+  "mappingId": "pdf-extract-to-legal-order",
   "name": "PDF Extract → X9.129 Legal Order Header",
   "version": "1.0.0",
   "status": "active",
+  "description": "Transforms raw PDF extraction output into a canonical X9.129 Legal Order Header. Includes jurisdiction-specific overrides for New York and California court formats.",
   "sourceFormat": "PDF_EXTRACT",
   "targetModelId": "X9_129_LEGAL_ORDER_HEADER_V1",
-  "tags": ["x9.129", "legal-order", "pdf"],
-  "createdAt": "2025-06-15T00:00:00Z",
-  "updatedAt": "2025-06-15T00:00:00Z",
 
-  "fields": [
-    { "source": "extracted.agencyName", "target": "issuingAgencyName", "transform": null },
-    { "source": "extracted.caseId", "target": "orderNumber", "transform": null },
-    { "source": "extracted.amount", "target": "orderAmount", "transform": "parseNumber" },
-    { "source": "extracted.date", "target": "effectiveDate", "transform": "parseDate" },
-    { "source": "extracted.state", "target": "jurisdictionCode", "transform": null }
+  "joltSpec": [
+    {
+      "operation": "shift",
+      "spec": {
+        "extracted": {
+          "agencyName": "issuingAgencyName",
+          "caseId": "orderNumber",
+          "amount": "orderAmount",
+          "date": "effectiveDate",
+          "state": "jurisdictionCode"
+        }
+      }
+    },
+    {
+      "operation": "default",
+      "spec": {
+        "orderType": "GARNISHMENT",
+        "status": "RECEIVED"
+      }
+    },
+    {
+      "operation": "remove",
+      "spec": {
+        "extracted": ""
+      }
+    }
   ],
 
-  "transforms": {
-    "parseNumber": {
-      "type": "expression",
-      "expr": "Number(value.replace(/[^0-9.]/g, ''))"
-    },
-    "parseDate": {
-      "type": "expression",
-      "expr": "new Date(value).toISOString().split('T')[0]"
-    }
+  "overrideSpecs": {
+    "NY": [
+      {
+        "operation": "shift",
+        "spec": {
+          "meta": { "index_no": "orderNumber" },
+          "body": { "return_date": "effectiveDate" }
+        }
+      }
+    ],
+    "CA": [
+      {
+        "operation": "shift",
+        "spec": {
+          "header": { "docket_number": "orderNumber" }
+        }
+      }
+    ]
   },
 
+  "testFixtures": [
+    {
+      "name": "Standard Ohio garnishment",
+      "input": {
+        "extracted": {
+          "agencyName": "Franklin County Court",
+          "caseId": "CASE-998877",
+          "amount": "$500.00",
+          "date": "2023-12-01",
+          "state": "OH"
+        }
+      },
+      "expectedOutput": {
+        "issuingAgencyName": "Franklin County Court",
+        "orderNumber": "CASE-998877",
+        "orderAmount": "$500.00",
+        "effectiveDate": "2023-12-01",
+        "jurisdictionCode": "OH",
+        "orderType": "GARNISHMENT",
+        "status": "RECEIVED"
+      }
+    },
+    {
+      "name": "New York garnishment (NY override)",
+      "input": {
+        "meta": { "index_no": "NY-2024-12345" },
+        "body": { "return_date": "2024-03-15" }
+      },
+      "expectedOutput": {
+        "orderNumber": "NY-2024-12345",
+        "effectiveDate": "2024-03-15",
+        "orderType": "GARNISHMENT",
+        "status": "RECEIVED"
+      }
+    }
+  ],
+
   "metadata": {
-    "relatedModels": ["X9_129_LEGAL_ORDER_HEADER_V1"]
+    "tags": ["x9-129", "legal-order", "pdf", "ingestion"],
+    "relatedModels": ["X9_129_LEGAL_ORDER_HEADER_V1"],
+    "relatedWorkflows": ["ingest-legal-order"]
   }
 }
+```
+
+**Why Jolt instead of field-by-field mappings:**
+- **`joltSpec[]`** — An array of Jolt operations (`shift`, `default`, `remove`, `sort`, `modify-default-beta`) that describe the full transformation pipeline. More expressive than source→target field pairs.
+- **`overrideSpecs{}`** — Jurisdiction-specific overrides keyed by code (e.g., `"NY"`, `"CA"`). Applied after the base `joltSpec` when the source document's jurisdiction matches. Enables a single mapping definition to handle regional format variations.
+- **`testFixtures[]`** — Embedded test cases with input/expectedOutput pairs. The Mapping Editor renders these for one-click validation of the transformation logic.
+- **Validation** — `mappingValidator.js` validates the Jolt spec structure: operation types, spec requirements, and warns on duplicates or empty specs.
 ```
 
 ---
@@ -668,7 +782,7 @@ Each feature represents a vertical slice of the platform. Features are ordered b
 | **Faceted search** | Filter by asset type, status (`active`/`draft`/`deprecated`), jurisdiction, document type, tags |
 | **Full-text search** | Search across asset names, descriptions, field names, tags |
 | **Relationship graph** | For a selected asset, show related assets (e.g., model → workflows that use it → decisions those workflows invoke) |
-| **Pagination** | Cursor-based pagination. Default page size 50. Required for 1000s of assets |
+| **Pagination** | Offset-based pagination. Default page size 20. Required for 1000s of assets |
 | **Bulk operations** | Multi-select → bulk tag, bulk status change |
 
 **API support:**
@@ -682,7 +796,7 @@ GET /api/assets/:assetType/:assetId/related
 - In-memory index with file-backed persistence (PoC). Designed for swap to database.
 - Assets stored as individual JSON files: `/data/{assetType}/{assetId}.json`
 - Index file (`/data/index.json`) maintains a lightweight catalog (id, type, name, tags, status, timestamps) to avoid loading full assets for listing/search.
-- All list endpoints return paginated responses: `{ items: [], total: number, page: number, pageSize: number }`
+- All list endpoints return paginated responses: `{ data: [], pagination: { total, page, pageSize, totalPages } }`
 
 ### Feature 2: Canonical Model Editor (JSON Forms + Zod)
 
@@ -761,7 +875,7 @@ GET /api/assets/:assetType/:assetId/related
 | **CNCF Serverless Workflow VS Code extension** | Already built by CNCF community | VS Code only, not embeddable | Reference for spec compliance, not embeddable in our platform |
 | **Custom React tree editor** | Lightweight, tailored to our UX | No ecosystem support | Fallback if Monaco is too heavy |
 
-**PoC approach:** Monaco Editor with the CNCF sw.json JSON Schema loaded for validation and autocomplete, plus a read-only state diagram rendered alongside.
+**PoC approach:** Monaco Editor with the CNCF sw.json JSON Schema loaded for validation and autocomplete, plus a Mermaid-based state diagram rendered alongside. The editor uses a resizable split-pane layout with tabs for Editor, Diagram, Validator, and Metadata. A StateBuilder component provides a visual UI for adding states from predefined templates.
 
 **Layout:**
 
@@ -851,9 +965,10 @@ GET /api/assets/:assetType/:assetId/related
 
 | Capability | Description |
 |---|---|
-| **Source/target columns** | Left: source format fields. Right: canonical model fields (auto-loaded from model). Draw lines between them |
-| **Transform functions** | Attach transform logic (regex, expression) to each mapping line |
-| **Test with sample** | Paste source data → see transformed output → validate against canonical model |
+| **Jolt spec editor** | JSON editor for Jolt transformation specifications (shift, default, remove operations) with syntax highlighting and validation |
+| **Override specs** | Jurisdiction-specific override specs (e.g., NY, CA) that customize the base transformation for regional format variations |
+| **Test fixtures** | Embedded test cases with input/expectedOutput pairs for one-click validation of transformation logic |
+| **Export** | Download the Jolt spec as a standalone file via `GET /api/mappings/:id/export` |
 
 ---
 
@@ -871,7 +986,7 @@ GET /api/assets/:assetType/:assetId/related
 | **Schema Validation** | ajv (server) + Zod (generated, client) | ajv for JSON Schema validation; Zod for typed runtime validation |
 | **Workflow SDK** | `@serverlessworkflow/sdk-typescript` v0.8.4 | Official CNCF SDK — schema validation, bundled v0.8 JSON Schema for Monaco, typed definitions |
 | **Code Editor** | Monaco Editor (`@monaco-editor/react`) | Same engine as VS Code; supports JSON Schema validation |
-| **Workflow Visualization** | `@xyflow/react` (React Flow) | Already proven in pipeline demo; ideal for state diagrams |
+| **Workflow Visualization** | `mermaid` | Lightweight declarative diagram syntax; renders state diagrams from workflow definitions without manual node layout |
 | **Data Store** | Document repository with swappable backends | MemoryRepository (dev) → CosmosRepository (prod) |
 | **Testing** | Vitest + supertest | Consistent with existing tooling |
 
@@ -888,7 +1003,7 @@ GET /api/assets/:assetType/:assetId/related
 │  │  │ Asset       │ │ Model Editor │ │ Workflow   │ │ Decision    │ │  │
 │  │  │ Catalog     │ │ (JSON Forms) │ │ Editor     │ │ Editor      │ │  │
 │  │  │             │ │              │ │ (Monaco +  │ │ (DMN Table) │ │  │
-│  │  │ Search,     │ │ Schema +     │ │ React Flow)│ │             │ │  │
+│  │  │ Search,     │ │ Schema +     │ │ Mermaid)   │ │             │ │  │
 │  │  │ Browse,     │ │ UI Schema +  │ │            │ │ + Mapping   │ │  │
 │  │  │ Filter      │ │ Live Preview │ │ + State    │ │   Editor    │ │  │
 │  │  │             │ │ + Zod Output │ │   Diagram  │ │             │ │  │
@@ -970,14 +1085,17 @@ GET /api/assets/:assetType/:assetId/related
 
 ## 7. API Contract
 
-All list endpoints support pagination: `?page=1&pageSize=50`. Responses follow the shape:
+All list endpoints support pagination: `?page=1&pageSize=20`. Responses follow the shape:
 
 ```json
 {
-  "items": [],
-  "total": 1234,
-  "page": 1,
-  "pageSize": 50
+  "data": [],
+  "pagination": {
+    "total": 1234,
+    "page": 1,
+    "pageSize": 20,
+    "totalPages": 62
+  }
 }
 ```
 
@@ -992,14 +1110,15 @@ All list endpoints support pagination: `?page=1&pageSize=50`. Responses follow t
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/models` | List all models (paginated, filterable) |
+| `GET` | `/api/models` | List all models (paginated, filterable by `status`, `standard`, `jurisdiction`, `documentType`, `tags`, `q`) |
+| `GET` | `/api/models/categories` | Get distinct standard categories with counts |
+| `GET` | `/api/models/resolve` | Resolve model by `?jurisdiction=&documentType=&effectiveDate=` |
 | `GET` | `/api/models/:modelId` | Get full unified model (jsonSchema + uiSchema + metadata) |
-| `POST` | `/api/models` | Create a new model |
+| `POST` | `/api/models` | Create a new model (returns 201) |
 | `PUT` | `/api/models/:modelId` | Update a model |
-| `DELETE` | `/api/models/:modelId` | Delete (blocked if referenced by active workflows/decisions) |
+| `DELETE` | `/api/models/:modelId` | Delete a model (returns 204) |
 | `POST` | `/api/models/:modelId/validate` | Validate a data payload against the model's JSON Schema |
 | `GET` | `/api/models/:modelId/zod` | Get the generated Zod schema as a string |
-| `GET` | `/api/models/resolve` | Resolve model by `?jurisdiction=&documentType=&effectiveDate=` |
 
 **`/api/models/resolve` — Resolution Algorithm:**
 
@@ -1019,59 +1138,128 @@ This algorithm ensures that `/resolve?effectiveDate=2025-06-01` returns the mode
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/workflows` | List all workflows (paginated, filterable) |
+| `GET` | `/api/workflows` | List all workflows (paginated, filterable by `status`, `tags`, `q`) |
+| `GET` | `/api/workflows/categories` | Aggregate workflows by status |
 | `GET` | `/api/workflows/:workflowId` | Get workflow (wrapper + definition) |
 | `GET` | `/api/workflows/:workflowId/definition` | Get raw `sw.json` only (for workflow runtime consumption) |
-| `POST` | `/api/workflows` | Create a workflow |
+| `POST` | `/api/workflows` | Create a workflow (returns 201) |
 | `PUT` | `/api/workflows/:workflowId` | Update a workflow |
-| `DELETE` | `/api/workflows/:workflowId` | Delete a workflow |
+| `DELETE` | `/api/workflows/:workflowId` | Delete a workflow (returns 204) |
 | `POST` | `/api/workflows/:workflowId/validate` | Validate sw.json against CNCF spec schema |
 
 ### 7.4 Decisions API
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/decisions` | List all decision tables (paginated, filterable) |
+| `GET` | `/api/decisions` | List all decision tables (paginated, filterable by `status`, `tags`, `q`, `namespace`, `name`) |
 | `GET` | `/api/decisions/:decisionId` | Get a decision definition |
-| `POST` | `/api/decisions` | Create a decision |
+| `GET` | `/api/decisions/:decisionId/export` | Export original DMN XML or JSON artifact |
+| `POST` | `/api/decisions` | Create a decision (returns 201) |
 | `PUT` | `/api/decisions/:decisionId` | Update a decision |
-| `DELETE` | `/api/decisions/:decisionId` | Delete a decision (blocked if referenced by active workflows) |
-| `POST` | `/api/decisions/:decisionId/evaluate` | Evaluate the decision table against an input payload. Returns matching rule + outputs |
+| `DELETE` | `/api/decisions/:decisionId` | Delete a decision (returns 204) |
+| `POST` | `/api/decisions/:decisionId/validate` | Validate decision table structure (hitPolicy, inputs, outputs, rules) |
+
+> **Note:** The `POST /api/decisions/:id/evaluate` endpoint described in §15.4 (Decision as a Service) is a planned integration point. The current PoC implements structural validation; full DMN evaluation is a future enhancement.
 
 ### 7.5 Mappings API
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/mappings` | List all mappings (paginated, filterable) |
-| `GET` | `/api/mappings/:mappingId` | Get a mapping definition |
-| `POST` | `/api/mappings` | Create a mapping |
-| `PUT` | `/api/mappings/:mappingId` | Update a mapping |
-| `DELETE` | `/api/mappings/:mappingId` | Delete a mapping |
+| `GET` | `/api/mappings` | List all mappings (paginated, filterable by `status`, `tags`, `q`) |
 | `GET` | `/api/mappings/resolve` | Resolve by `?sourceFormat=&targetModelId=` |
-| `POST` | `/api/mappings/:mappingId/transform` | Apply mapping to a source payload → return transformed data |
+| `GET` | `/api/mappings/:mappingId` | Get a mapping definition |
+| `GET` | `/api/mappings/:mappingId/export` | Export Jolt spec as a standalone file |
+| `POST` | `/api/mappings` | Create a mapping (returns 201) |
+| `PUT` | `/api/mappings/:mappingId` | Update a mapping |
+| `DELETE` | `/api/mappings/:mappingId` | Delete a mapping (returns 204) |
+| `POST` | `/api/mappings/:mappingId/validate` | Validate Jolt spec structure |
+
+> **Note:** The `POST /api/mappings/:id/transform` endpoint described in §15.2 (Ingest Workflow) is a planned integration point for applying a mapping to a source payload. The current PoC implements Jolt spec validation; runtime transform execution is a future enhancement.
+
+### 7.6 Health API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Full health check — returns storage backend type and asset count |
+| `GET` | `/health` | Lightweight pre-flight check |
+| `HEAD` | `/health` | Returns 200 if server is responding |
 
 ---
 
 ## 8. Seed Data
 
-Seed canonical models are derived from the ANSI X9 standards (X9.129 and X9.144). See `docs/x9-record-types-plan.md` for the complete record type inventory and phased rollout covering all 32 record types.
+Seed canonical models are derived from the ANSI X9 standards (X9.129 and X9.144). See `docs/x9-record-types-plan.md` for the complete record type inventory and phased rollout. All 32 record types across both standards are implemented.
 
-| Asset Type | ID | Standard | RT | Notes |
-|---|---|---|---|---|
-| **Model** | `X9_129_LEGAL_ORDER_HEADER_V1` | X9.129 | 20 | 14 fields — order type codes, amounts, dates, jurisdiction, priority |
-| **Model** | `X9_129_SUBJECT_INFO_V1` | X9.129 | 25 | 13 fields — conditional SSN/EIN based on subject type (individual vs business) |
-| **Model** | `X9_144_SUBPOENA_HEADER_V1` | X9.144 | 20 | 15 fields — subpoena types, requesting party, compliance deadlines, production scope |
-| **Model** | `X9_129_RESPONSE_V1` | X9.129 | 50 | 11 fields — conditional amount fields based on response type (hold vs payment) |
-| **Workflow** | `ingest-legal-order` | — | — | Ingestion · 6 states (ResolveModel → ResolveMapping → TransformDocument → ValidateOrder → StoreControlRecord / RouteToException); calls metadata server for resolve/transform/validate; stores to control record store (out of scope); emits event to trigger `process-legal-order` |
-| **Workflow** | `ingest-subpoena` | — | — | Ingestion · 6 states; parallels `ingest-legal-order` for X9.144 subpoenas; same pipeline pattern (resolve → map → transform → validate → store) |
-| **Workflow** | `process-legal-order` | — | — | Processing · 8 states (HydrateOrder → EnrichWithPartySearch [sub] → EvaluateRouting → RouteOrder [switch] → ManualReview / AutoApprove → NotifyParties [sub] / RouteToException); invokes `party-search` and `notify-parties` as sub-workflows |
-| **Workflow** | `process-subpoena` | — | — | Processing · 7 states; invokes `party-search` as a sub-workflow for party enrichment before compliance evaluation |
-| **Workflow** | `party-search` | — | — | Enrichment · 6 states (ExtractSearchCriteria → SearchByName → ReconcileResults → EvaluateMatch [switch] → EnrichRecord / ReturnNoMatch); reusable sub-workflow invoked by processing workflows across order types |
-| **Workflow** | `notify-parties` | — | — | Notification · 6 states (ResolveRecipients → RenderTemplates → ChooseChannel [switch] → Dispatch → RecordDelivery / LogFailure); reusable sub-workflow for party notifications |
-| **Decision** | `legal-order-routing` | — | — | 4 rules, FIRST hit policy, amount/jurisdiction/type inputs |
-| **Decision** | `subpoena-compliance` | — | — | Rules for compliance priority and routing |
-| **Mapping** | `PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1` | — | — | 5 field mappings with transforms |
-| **Mapping** | `EDI_TO_X9_144_SUBPOENA_V1` | — | — | 6 field mappings with transforms |
+### 8.1 Models (32 total)
+
+**X9.129 — Legal Orders Exchange (16 models):**
+
+| ID | RT | Description |
+|---|---|---|
+| `X9_129_FILE_HEADER_V1` | 01 | File-level metadata |
+| `X9_129_BATCH_HEADER_V1` | 10 | Batch-level metadata |
+| `X9_129_LEGAL_ORDER_HEADER_V1` | 20 | Core order identification and classification |
+| `X9_129_SUBJECT_INFO_V1` | 25 | Subject/individual details (conditional SSN/EIN) |
+| `X9_129_ACCOUNT_DETAIL_V1` | 30 | Account information |
+| `X9_129_AMOUNT_DETAIL_V1` | 31 | Amount breakdowns |
+| `X9_129_AGENCY_DETAIL_V1` | 32 | Issuing agency details |
+| `X9_129_ATTORNEY_V1` | 33 | Attorney/legal representative |
+| `X9_129_ASSET_DETAIL_V1` | 34 | Asset details for seizure orders |
+| `X9_129_FI_INFO_V1` | 35 | Financial institution information |
+| `X9_129_ADDENDA_V1` | 40 | Supplementary information |
+| `X9_129_RESPONSE_V1` | 50 | Response record (conditional by response type) |
+| `X9_129_PAYMENT_V1` | 55 | Payment details |
+| `X9_129_RELEASE_MOD_V1` | 60 | Release/modification records |
+| `X9_129_TR51_MAPPING_V1` | 51 | TR-51 mapping record |
+| `X9_129_BATCH_TRAILER_V1` | 90 | Batch trailer |
+
+**X9.144 — Production Subpoena Orders Exchange (16 models):**
+
+| ID | RT | Description |
+|---|---|---|
+| `X9_144_FILE_HEADER_V1` | 01 | File-level metadata |
+| `X9_144_BATCH_HEADER_V1` | 10 | Batch-level metadata |
+| `X9_144_SUBPOENA_HEADER_V1` | 20 | Core subpoena identification |
+| `X9_144_SUBJECT_INFO_V1` | 25 | Subject details |
+| `X9_144_REQUESTING_PARTY_V1` | 30 | Requesting party details |
+| `X9_144_ATTORNEY_V1` | 33 | Attorney/legal representative |
+| `X9_144_PRODUCTION_REQ_V1` | 35 | Production requirements |
+| `X9_144_DATE_RANGE_V1` | 36 | Date range specifications |
+| `X9_144_ADDENDA_V1` | 40 | Supplementary information |
+| `X9_144_RESPONSE_V1` | 50 | Response record |
+| `X9_144_COMPLIANCE_CERT_V1` | 55 | Compliance certification |
+| `X9_144_DOC_PRODUCTION_V1` | 60 | Document production details |
+| `X9_144_OBJECTION_V1` | 65 | Objection records |
+| `X9_144_FILE_TRAILER_V1` | 99 | File trailer |
+| `X9_144_BATCH_TRAILER_V1` | 90 | Batch trailer |
+
+### 8.2 Workflows (6 total)
+
+| ID | Category | Description |
+|---|---|---|
+| `ingest-legal-order` | ingestion | 6 states — ResolveModel → ResolveMapping → TransformDocument → ValidateOrder → StoreControlRecord / RouteToException |
+| `ingest-subpoena` | ingestion | 6 states — parallels `ingest-legal-order` for X9.144 subpoenas |
+| `process-legal-order` | processing | 8 states — HydrateOrder → EnrichWithPartySearch [sub] → EvaluateRouting → RouteOrder [switch] → ManualReview / AutoApprove → NotifyParties [sub] / RouteToException |
+| `process-subpoena` | processing | 7 states — invokes `party-search` for enrichment before compliance evaluation |
+| `party-search` | enrichment | 6 states — ExtractSearchCriteria → SearchByName → ReconcileResults → EvaluateMatch [switch] → EnrichRecord / ReturnNoMatch |
+| `notify-parties` | notification | 6 states — ResolveRecipients → RenderTemplates → ChooseChannel [switch] → Dispatch → RecordDelivery / LogFailure |
+
+### 8.3 Decisions (4 total)
+
+| ID | Hit Policy | Rules | Description |
+|---|---|---|---|
+| `legal-order-routing` | FIRST | 5 | Routes legal orders by type, amount, jurisdiction. 3 inputs (orderTypeCode, totalAmount, jurisdictionCode), 3 outputs (requiresManualReview, routingQueue, priority) |
+| `subpoena-compliance` | FIRST | 6 | Compliance priority and routing for subpoenas. 4 inputs, 4 outputs |
+| `risk-assessment` | FIRST | — | Risk assessment rules |
+| `draft-test-decision` | — | — | Test decision in draft status |
+
+### 8.4 Mappings (3 total)
+
+| ID | Source Format | Target Model | Description |
+|---|---|---|---|
+| `pdf-extract-to-legal-order` | PDF_EXTRACT | X9_129_LEGAL_ORDER_HEADER_V1 | 3 Jolt operations, 2 jurisdiction overrides (NY, CA), 2 test fixtures |
+| `edi-to-subpoena` | EDI | X9_144_SUBPOENA_HEADER_V1 | 3 Jolt operations, 1 test fixture |
+| `x9-field-mapping` | — | — | X9 field mapping reference |
 
 ---
 
@@ -1080,101 +1268,133 @@ Seed canonical models are derived from the ANSI X9 standards (X9.129 and X9.144)
 ```text
 /
 ├── docs/
-│   └── canonical-model-metadata-server.md     # This specification
+│   ├── canonical-model-metadata-server.md     # This specification
+│   ├── x9-record-types-plan.md                # X9 record type inventory
+│   ├── implementation-plan.md                 # Phase-by-phase implementation guide
+│   ├── phase-1-foundation.md ... phase-7-observe.md  # Per-phase docs
+│   ├── cncf-sdk-client-plan.md                # CNCF SDK integration plan
+│   └── style-guide.md                         # UI/UX style guidelines
 ├── server/
-│   ├── package.json                           # Express, ajv, cors
+│   ├── package.json                           # Express, ajv, cors, @serverlessworkflow/sdk-typescript
+│   ├── vitest.config.js
 │   ├── src/
-│   │   ├── server.js                          # Express app entry point
+│   │   ├── server.js                          # Express app entry point + health endpoints
+│   │   ├── config.js                          # PORT, STORAGE_BACKEND, SEED_DATA_DIR, Cosmos config
 │   │   ├── routes/
 │   │   │   ├── assets.js                      # /api/assets (unified search)
-│   │   │   ├── models.js                      # /api/models
-│   │   │   ├── workflows.js                   # /api/workflows
-│   │   │   ├── decisions.js                   # /api/decisions
-│   │   │   └── mappings.js                    # /api/mappings
+│   │   │   ├── models.js                      # /api/models + /categories + /resolve + /validate + /zod
+│   │   │   ├── workflows.js                   # /api/workflows + /definition + /categories + /validate
+│   │   │   ├── decisions.js                   # /api/decisions + /export + /validate
+│   │   │   └── mappings.js                    # /api/mappings + /resolve + /export + /validate
 │   │   ├── services/
-│   │   │   ├── modelService.js                # Model-specific logic + validation
-│   │   │   ├── workflowService.js             # Workflow-specific logic + sw.json validation
-│   │   │   ├── decisionService.js             # Decision-specific logic + evaluation engine
-│   │   │   └── mappingService.js              # Mapping-specific logic + transform execution
+│   │   │   ├── modelService.js                # Model CRUD + validation + Zod generation + resolve
+│   │   │   ├── workflowService.js             # Workflow CRUD + definition export + sw.json validation
+│   │   │   ├── decisionService.js             # Decision CRUD + DMN export + structural validation
+│   │   │   └── mappingService.js              # Mapping CRUD + Jolt export + validation + resolve
 │   │   ├── repositories/
-│   │   │   ├── AssetRepository.js             # Repository interface contract
-│   │   │   ├── MemoryRepository.js            # Dev: in-memory + JSON file persistence
-│   │   │   ├── CosmosRepository.js            # Prod: @azure/cosmos SDK (stub for Phase 1)
+│   │   │   ├── AssetRepository.js             # Repository interface contract (abstract base class)
+│   │   │   ├── MemoryRepository.js            # Dev: in-memory Map + seed data loading + summary generation
+│   │   │   ├── CosmosRepository.js            # Prod: @azure/cosmos SDK (stub — not implemented)
 │   │   │   └── repositoryFactory.js           # Instantiates correct repo from config
 │   │   ├── validation/
-│   │   │   ├── schemaValidator.js             # ajv-based JSON Schema validation
-│   │   │   ├── workflowValidator.js           # CNCF sw.json structural validation
+│   │   │   ├── schemaValidator.js             # ajv-based JSON Schema validation (cached)
+│   │   │   ├── workflowValidator.js           # CNCF SDK schema + referential integrity checks
+│   │   │   ├── mappingValidator.js            # Jolt spec structural validation
 │   │   │   └── zodGenerator.js                # JSON Schema → Zod schema string generator
 │   │   └── middleware/
-│   │       └── errorHandler.js                # Centralized error handling
+│   │       └── errorHandler.js                # Centralized error handling (AppError → JSON)
 │   └── data/
 │       └── seed/
-│           ├── models/
-│           │   ├── X9_129_LEGAL_ORDER_HEADER_V1.json
-│           │   ├── X9_129_SUBJECT_INFO_V1.json
-│           │   ├── X9_144_SUBPOENA_HEADER_V1.json
-│           │   └── X9_129_RESPONSE_V1.json
-│           ├── workflows/
-│           │   ├── ingest-legal-order.json
-│           │   ├── ingest-subpoena.json
-│           │   ├── process-legal-order.json
-│           │   ├── process-subpoena.json
-│           │   ├── party-search.json
-│           │   └── notify-parties.json
-│           ├── decisions/
-│           │   ├── legal-order-routing.json
-│           │   └── subpoena-compliance.json
-│           └── mappings/
-│               ├── PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1.json
-│               └── EDI_TO_X9_144_SUBPOENA_V1.json
+│           ├── models/                        # 32 model JSON files (16 X9.129 + 16 X9.144)
+│           ├── workflows/                     # 6 workflow JSON files
+│           ├── decisions/                     # 4 decision JSON files
+│           └── mappings/                      # 3 mapping JSON files
 ├── client/
-│   ├── package.json                           # React, Vite, JSON Forms, Monaco, React Flow
+│   ├── package.json                           # React, Vite, JSON Forms, Monaco, Mermaid, MUI
 │   ├── vite.config.js
 │   ├── index.html
 │   └── src/
 │       ├── main.jsx                           # App entry
-│       ├── App.jsx                            # Shell: sidebar nav + content area
+│       ├── App.jsx                            # Shell: MUI theme + router + sidebar + content area
 │       ├── api/
 │       │   └── client.js                      # Fetch wrapper for /api/* endpoints
 │       ├── features/
-│       │   ├── catalog/
-│       │   │   ├── AssetCatalog.jsx           # Search, browse, filter all assets
-│       │   │   └── AssetRelationships.jsx     # Related asset graph
 │       │   ├── models/
-│       │   │   ├── ModelEditor.jsx            # JSON Schema + UI Schema editing
+│       │   │   ├── CategoryBrowser.jsx        # Landing page: X9.129 / X9.144 standard categories
+│       │   │   ├── ModelBrowser.jsx            # Standard-filtered model list (grid/carousel/list views)
+│       │   │   ├── ModelEditor.jsx            # JSON Schema + UI Schema editing with split pane
+│       │   │   ├── ModelEditorRoute.jsx       # Route wrapper for editor
 │       │   │   ├── ModelPreview.jsx           # Live JSON Forms rendering
-│       │   │   └── ZodPreview.jsx             # Generated Zod output
+│       │   │   ├── ZodPreview.jsx             # Generated Zod output display
+│       │   │   ├── ModelGrid.jsx              # Grid view mode
+│       │   │   ├── ModelList.jsx              # List view mode
+│       │   │   └── ModelCarousel.jsx          # Carousel view mode
 │       │   ├── workflows/
-│       │   │   ├── WorkflowEditor.jsx         # Monaco + sw.json schema
-│       │   │   └── WorkflowDiagram.jsx        # React Flow state diagram
+│       │   │   ├── WorkflowBrowser.jsx        # Workflow list with grid/list toggle
+│       │   │   ├── WorkflowEditor.jsx         # Monaco + resizable split pane + tabs
+│       │   │   ├── WorkflowEditorRoute.jsx    # Route wrapper
+│       │   │   ├── WorkflowViewer.jsx         # Read-only workflow display
+│       │   │   ├── WorkflowMermaidDiagram.jsx # Mermaid-based state diagram rendering
+│       │   │   ├── WorkflowProcessDiagram.jsx # Process flow visualization
+│       │   │   ├── StateBuilder.jsx           # Visual UI for adding/editing workflow states
+│       │   │   ├── stateTemplates.js          # Predefined state templates for StateBuilder
+│       │   │   ├── useWorkflowValidation.js   # Hook for real-time validation
+│       │   │   ├── WorkflowGrid.jsx           # Grid view mode
+│       │   │   ├── WorkflowList.jsx           # List view mode
+│       │   │   └── WorkflowThumbnail.jsx      # Thumbnail card component
 │       │   ├── decisions/
-│       │   │   ├── DecisionEditor.jsx         # DMN table grid editor
-│       │   │   └── DecisionTester.jsx         # Rule evaluation testing
-│       │   ├── mappings/
-│       │   │   ├── MappingEditor.jsx          # Source→target field mapping
-│       │   │   └── MappingTester.jsx          # Transform testing
-│       │   └── inspector/
-│       │       ├── DataInspector.jsx          # Render data through model forms (read-only)
-│       │       └── WorkflowTracer.jsx         # Visualize workflow execution paths
-│       └── components/
-│           ├── JsonEditor.jsx                 # Shared Monaco JSON editor wrapper
-│           └── AssetHeader.jsx                # Shared asset header (name, version, status, save/cancel)
+│       │   │   ├── DecisionBrowser.jsx        # Decision list with grid/list toggle
+│       │   │   ├── DecisionEditor.jsx         # DMN table editor (inputs, outputs, rules, hit policy)
+│       │   │   ├── DecisionEditorRoute.jsx    # Route wrapper
+│       │   │   ├── DecisionViewer.jsx         # Read-only decision display
+│       │   │   ├── DecisionGrid.jsx           # Grid view mode
+│       │   │   ├── DecisionList.jsx           # List view mode
+│       │   │   └── DecisionThumbnail.jsx      # Thumbnail card component
+│       │   └── mappings/
+│       │       ├── MappingBrowser.jsx         # Mapping list with grid/list toggle
+│       │       ├── MappingEditor.jsx          # Jolt spec editor with overrides and test fixtures
+│       │       ├── MappingEditorRoute.jsx     # Route wrapper
+│       │       ├── MappingViewer.jsx          # Read-only mapping display
+│       │       ├── MappingGrid.jsx            # Grid view mode
+│       │       ├── MappingList.jsx            # List view mode
+│       │       └── MappingThumbnail.jsx       # Thumbnail card component
+│       ├── components/
+│       │   ├── Sidebar.jsx                    # Persistent left nav (Models, Workflows, Decisions, Mappings)
+│       │   ├── AssetHeader.jsx                # Shared asset header (name, version, status, save/cancel)
+│       │   ├── FormThumbnail.jsx              # Visual preview of form field groups/constraints
+│       │   └── renderers/
+│       │       └── DomainGroupRenderer.jsx    # Color-coded group rendering for forms
+│       └── theme/
+│           └── domainColors.js                # Color mapping utilities
+├── extension/
+│   ├── package.json                           # VS Code extension dependencies
+│   ├── tsconfig.json
+│   ├── src/
+│   │   ├── extension.ts                       # Extension entry — Copilot Chat participant + LM tools
+│   │   ├── metadataClient.ts                  # HTTP wrapper for metadata server REST API
+│   │   ├── prompts/
+│   │   │   └── system.md                      # System prompt for Copilot Chat
+│   │   └── tools/
+│   │       ├── healthTool.ts                  # Check server health
+│   │       ├── listAssetsTool.ts              # List assets with filters
+│   │       ├── getAssetTool.ts                # Fetch single asset by type + ID
+│   │       └── searchAssetsTool.ts            # Cross-type asset search
+│   └── test/
+│       └── metadataClient.test.ts             # Client unit tests
 ├── tests/
-│   ├── server/
-│   │   ├── models.test.js
-│   │   ├── workflows.test.js
-│   │   ├── decisions.test.js
-│   │   └── mappings.test.js
-│   └── client/
-│       └── (component tests)
-└── package.json                               # Root: workspaces or scripts to run both
+│   └── server/
+│       ├── models.test.js                     # 13+ test cases: CRUD, filtering, pagination, validation
+│       ├── workflows.test.js                  # CRUD, definition export, filtering, validation
+│       ├── decisions.test.js                  # CRUD, filtering, validation, summary verification
+│       └── mappings.test.js                   # CRUD, resolve, filtering, Jolt spec validation
+└── package.json                               # Root: concurrently, dev/build scripts
 ```
 
 ---
 
 ## 10. Scalability Design Decisions
 
-Even as a PoC, these decisions ensure the architecture doesn't collapse when moving from 8 seed assets to 1000s:
+Even as a PoC, these decisions ensure the architecture doesn't collapse when moving from 45 seed assets to 1000s:
 
 | Decision | Rationale |
 |---|---|
@@ -1182,7 +1402,7 @@ Even as a PoC, these decisions ensure the architecture doesn't collapse when mov
 | **Document-per-asset** | Each governance asset is a self-contained JSON document with a unique `id` and `documentType` partition key. Maps directly to Cosmos DB containers and document semantics. |
 | **In-memory index for dev** | `MemoryRepository` builds a lightweight in-memory index on startup from seed files. List/search reads from the index — not from loading every full document. |
 | **Seed data as JSON files** | Development seed data ships as `/data/seed/{type}/*.json`. `MemoryRepository` loads these on startup. Production loads from Cosmos DB. |
-| **Cursor-based pagination** | All list endpoints paginate. No full-collection responses. Default page size 50. |
+| **Offset-based pagination** | All list endpoints paginate. No full-collection responses. Default page size 20. |
 | **Server-side search** | Full-text search over the index/container, not client-side filtering. Swappable to Elasticsearch later. |
 | **Lazy loading in UI** | Catalog shows summary cards. Full asset loaded only when opened for editing. |
 | **Immutable versions (future)** | Status lifecycle: `draft` → `active` → `deprecated`. Active assets are immutable; edits create a new version. PoC allows in-place mutation for simplicity. |
@@ -1195,16 +1415,19 @@ Even as a PoC, these decisions ensure the architecture doesn't collapse when mov
 
 1. **Monorepo structure:** Root `package.json` with `server/` and `client/` workspaces. Use npm workspaces or simple root scripts (`npm run dev:server`, `npm run dev:client`).
 2. **Server:** Express.js, Node.js 20+. Repository pattern for data persistence (`MemoryRepository` for development, `CosmosRepository` stub for production). All service functions return Promises.
-3. **Client:** React 18 + Vite. **MUI-first** — use `@mui/material` for all layout, navigation, data display, inputs, and feedback components. Do not write custom HTML/CSS for elements MUI provides. Use `@jsonforms/react` + `@jsonforms/material-renderers` for form rendering (inherits MUI theme). Use `@monaco-editor/react` for JSON editing. Use `@xyflow/react` for workflow diagrams. Use `@serverlessworkflow/sdk-typescript` for sw.json schema validation and Monaco schema autocomplete.
+3. **Client:** React 18 + Vite. **MUI-first** — use `@mui/material` for all layout, navigation, data display, inputs, and feedback components. Do not write custom HTML/CSS for elements MUI provides. Use `@jsonforms/react` + `@jsonforms/material-renderers` for form rendering (inherits MUI theme). Use `@monaco-editor/react` for JSON editing. Use `mermaid` for workflow state diagrams. Use `@serverlessworkflow/sdk-typescript` for sw.json schema validation and Monaco schema autocomplete.
 4. **Unified model:** Canonical models use `jsonSchema` + `uiSchema` in one object. ajv validates on server. Zod schema is generated (not hand-maintained). JSON Forms renders from these directly.
-5. **Pagination everywhere:** All list endpoints return `{ items, total, page, pageSize }`. Default page size 50.
+5. **Pagination everywhere:** All list endpoints return `{ data, pagination: { total, page, pageSize, totalPages } }`. Default page size 20.
 6. **Repository pattern:** Implement a shared `AssetRepository` interface that handles CRUD, search, and pagination for all governance asset types. `MemoryRepository` is the development implementation (in-memory Map + JSON file persistence). `CosmosRepository` is the production stub using `@azure/cosmos`. Type-specific services compose the repository, not extend it.
 7. **Seed data:** Ship the seed data from Section 8 as JSON files in `/data/seed/`. `MemoryRepository` loads these on startup. Configuration selects which repository backend to use.
-8. **Feature folders:** Client code organized by feature (`catalog/`, `models/`, `workflows/`, `decisions/`, `mappings/`, `inspector/`).
+8. **Feature folders:** Client code organized by feature (`models/`, `workflows/`, `decisions/`, `mappings/`). Catalog and Inspector features are planned for future phases.
 9. **No auth:** PoC scope. CORS enabled for local dev.
-10. **Dark theme:** Match the existing Anax design system (`#0f172a` background, `#1e293b` cards, `#334155` borders, `#e2e8f0` text).
+10. **Light theme:** The platform uses a professional light theme — `#F8FAFC` background, `#FFFFFF` paper/cards, `#1E293B` text, `#1E3A5F` sidebar. Status colors: green (active), blue (draft), red (deprecated).
 11. **Testing:** Vitest + supertest for server. Vitest + React Testing Library for client. Prioritize API integration tests.
-12. **DMN evaluation:** Implement a simple rule evaluator for the JSON-based DMN representation (not a full DMN engine). Match rules by hit policy (FIRST, COLLECT).
+12. **DMN validation:** Decisions store original DMN XML in `sourceContent` alongside parsed inputs/outputs/rules for the editor. Structural validation checks hitPolicy, input/output definitions, and rule completeness. Full DMN evaluation as a service (`/evaluate` endpoint) is a planned enhancement.
+13. **Jolt mappings:** Transformation mappings use Jolt specifications (`joltSpec[]`) instead of field-by-field source→target mappings. Support jurisdiction-specific `overrideSpecs{}` and embedded `testFixtures[]`. `mappingValidator.js` validates Jolt spec structure.
+14. **Validation endpoints:** Each asset type has a `POST /api/{type}/:id/validate` endpoint. Models validate data payloads against JSON Schema; workflows validate against the CNCF SDK; decisions validate structural completeness; mappings validate Jolt spec structure.
+15. **Summary generation:** List endpoints return lightweight summaries generated by the repository layer: `formSummary` (models), `workflowSummary` (workflows), `decisionSummary` (decisions), `mappingSummary` (mappings). Full assets loaded only when opened for editing.
 
 ---
 
@@ -1212,14 +1435,15 @@ Even as a PoC, these decisions ensure the architecture doesn't collapse when mov
 
 The PoC is complete when:
 
-1. **Asset Catalog** — Can browse, search, and filter across all 10 seed governance assets (4 models, 2 workflows, 2 decisions, 2 mappings). Pagination works.
+1. **Asset Catalog** — Can browse, search, and filter across all 45 seed governance assets (32 models, 6 workflows, 4 decisions, 3 mappings). Pagination works. Models browsable by standard category (X9.129 / X9.144) with grid, list, and carousel view modes.
 2. **Model Editor** — Can create/edit a unified model. JSON Schema editor + UI Schema layout + live JSON Forms preview renders correctly. Zod output is generated.
 3. **Model Validation** — `POST /api/models/:id/validate` returns structured errors. Errors display inline on the form preview.
-4. **Workflow Editor** — Monaco editor with `sw.json` schema validation. State diagram renders alongside and updates live.
-5. **Decision Editor** — Can create/edit DMN tables. `POST /api/decisions/:id/evaluate` returns the correct rule match.
-6. **Data Inspector** — Can render an order payload through its model's form in read-only mode.
-7. **Tests pass** — Server API tests cover CRUD + validation + evaluation for all asset types.
-8. **Seed data loads** — Server starts with all seed assets. No manual setup.
+4. **Workflow Editor** — Monaco editor with `sw.json` schema validation. Mermaid state diagram renders alongside. StateBuilder provides visual state creation. Resizable split-pane layout with Editor/Diagram/Validator/Metadata tabs.
+5. **Decision Editor** — Can create/edit DMN tables with inputs, outputs, rules, and hit policy. `POST /api/decisions/:id/validate` validates structural integrity. DMN XML preserved in `sourceContent` for round-trip fidelity.
+6. **Mapping Editor** — Can create/edit Jolt transformation specs with jurisdiction-specific overrides and embedded test fixtures. `POST /api/mappings/:id/validate` validates Jolt spec structure.
+7. **Tests pass** — Server API tests cover CRUD + filtering + pagination + validation for all asset types (50+ test cases across 4 domains).
+8. **Seed data loads** — Server starts with all 45 seed assets. No manual setup.
+9. **VS Code Extension** — Copilot Chat participant with 4 language model tools (health, list, get, search) provides conversational access to the asset catalog.
 
 ---
 
@@ -1246,12 +1470,56 @@ The design principle remains: **metadata is the single source of truth. Code int
 |---|---|
 | `MemoryRepository` (in-memory + JSON files) | `CosmosRepository` with Azure Cosmos DB |
 | No auth | Azure AD / OAuth2 + RBAC per asset type |
-| Simple DMN evaluator | Full DMN engine (e.g., dmn-js / Camunda) |
+| Structural DMN validation | Full DMN evaluation engine (`/evaluate` endpoint) + dmn-js / Camunda |
+| Jolt spec validation only | Runtime Jolt transform execution (`/transform` endpoint) |
 | Monaco + JSON Schema for sw.json | Custom language server with jq expression support |
-| Read-only workflow diagram | Interactive diagram editing (drag states, draw transitions) |
+| Mermaid state diagrams (read-only) | Interactive diagram editing (drag states, draw transitions) via React Flow |
 | In-place mutation | Immutable versioning with draft/active/deprecated lifecycle |
 | Single instance | Kubernetes deployment + CDN for static assets |
 | Generated Zod strings | Published Zod schemas as npm packages for consumer apps |
+| VS Code extension (Copilot Chat tools) | Full extension with pull/push/build integration (§15.1) |
+| Light theme only | Configurable light/dark theme with Anax design system |
+| No catalog/inspector features | Unified Asset Catalog (§5.1) and Data Inspector (§5.5) features |
+
+---
+
+## 14.1 VS Code Extension (Implemented)
+
+The `extension/` directory contains a working VS Code extension that provides conversational access to the metadata server through GitHub Copilot Chat.
+
+**Architecture:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  VS Code Extension (extension/)                           │
+│                                                          │
+│  ┌────────────────────┐   ┌───────────────────────────┐  │
+│  │ Chat Participant    │   │ Language Model Tools       │  │
+│  │ anax.metadata       │   │                           │  │
+│  │                     │   │  metadata_health          │  │
+│  │ System prompt from  │──▶│  metadata_list            │  │
+│  │ prompts/system.md   │   │  metadata_get             │  │
+│  │                     │   │  metadata_search           │  │
+│  └────────────────────┘   └───────────┬───────────────┘  │
+│                                        │                  │
+│  ┌─────────────────────────────────────▼───────────────┐  │
+│  │ MetadataClient (metadataClient.ts)                   │  │
+│  │ HTTP wrapper: health, list, get, create, update,     │  │
+│  │               validate, search                        │  │
+│  │ Base URL: http://localhost:3001                       │  │
+│  └──────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Capabilities:**
+- **`metadata_health`** — Check server status and asset count
+- **`metadata_list`** — List assets by type with optional filters (status, tags, query)
+- **`metadata_get`** — Fetch a single asset by type and ID
+- **`metadata_search`** — Cross-type search across all asset types
+
+**Usage:** Users interact with the `@anax.metadata` chat participant in VS Code. The extension's system prompt (loaded from `prompts/system.md`) describes the platform's domain, available tools, and asset types. The tool-calling loop uses `gpt-4o` to select and invoke tools based on the user's natural language query.
+
+**Future:** The extension is the foundation for the full pull/push/build integration described in §15.1. Adding `create`, `update`, and `validate` tools will enable authoring directly from VS Code's Copilot Chat.
 
 ---
 
@@ -1317,7 +1585,7 @@ _PoC uses Sub-pattern B. Sub-pattern A is documented as the production path._
 
 #### Future path — VS Code Extension
 
-The intended long-term solution eliminates the manual export step. A VS Code extension authenticates against the metadata server, presents the asset catalog in a sidebar, and provides:
+A VS Code extension is **already implemented** in `extension/` (see §14.1) with Copilot Chat integration for browsing and querying assets. The intended next step extends this to full pull/push/build integration:
 
 - **Pull** — fetch a workflow definition from the catalog directly into `src/main/resources/` in the current workspace (replacing the manual export download)
 - **Push** — read a locally modified `sw.json` back to the metadata server as a new draft version (with diff preview)
@@ -1354,10 +1622,10 @@ GET /api/models/resolve?jurisdiction=NY&documentType=LEGAL_ORDER&effectiveDate=2
     │
     ▼  ResolveMapping state — metadata server
 GET /api/mappings/resolve?sourceFormat=PDF_EXTRACT&targetModelId=X9_129_LEGAL_ORDER_HEADER_V1
-    │  → { mappingId: "PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1" }
+    │  → { mappingId: "pdf-extract-to-legal-order" }
     │
     ▼  TransformDocument state — metadata server
-POST /api/mappings/PDF_EXTRACT_TO_X9_129_LEGAL_ORDER_V1/transform
+POST /api/mappings/pdf-extract-to-legal-order/transform
 Body: { raw extracted fields }
     │  → { canonical payload }
     │
@@ -1380,6 +1648,8 @@ emit: { controlRecordId: "CR-2026-001", modelId: "X9_129_LEGAL_ORDER_HEADER_V1" 
 **Audit trail integrity:** The `effectiveDate` passed to `/resolve` is the document's own effective date, not the processing date. The resolve algorithm (§7.2) returns the model that **was active on that date**, ensuring the governing model version is reproducible for future audits regardless of when the record is inspected.
 
 **Validation failure path:** If `ValidateOrder` returns `valid: false`, the workflow transitions to an error state, emits a rejection event, and does **not** store a control record. No `controlRecordId` is issued for invalid documents.
+
+> **PoC status:** The `/api/mappings/:id/transform` endpoint is a planned integration point. The current PoC implements Jolt spec validation (`POST /api/mappings/:id/validate`) and structure export (`GET /api/mappings/:id/export`). Runtime Jolt transform execution is a future enhancement.
 
 ---
 
@@ -1415,6 +1685,8 @@ Body: { orderAmount: 75000, jurisdictionCode: "NY", orderTypeCode: "TAX_LEVY" }
 
 **When:** A workflow needs routing, prioritization, or compliance logic that is owned by compliance/operations teams and must evolve independently of the workflow definition.
 
+> **PoC status:** The `/api/decisions/:id/evaluate` endpoint is a planned integration point. The current PoC implements structural validation (`POST /api/decisions/:id/validate`). The decision evaluation pattern below describes the intended production behavior.
+
 ```
 sw.json CheckRouting state
     │
@@ -1449,6 +1721,8 @@ A CNCF SW `switch` state can express routing logic as inline jq expressions with
 ### 15.5 Pattern: Operational Inspection
 
 **When:** An operator or developer needs to inspect a live order payload in human-readable form — without building a custom UI for each order type.
+
+> **PoC status:** The Data Inspector described below is a planned feature. The current PoC provides JSON Forms rendering in the Model Editor for authoring; the read-only operational inspection mode is a future enhancement.
 
 ```
 Operator has:

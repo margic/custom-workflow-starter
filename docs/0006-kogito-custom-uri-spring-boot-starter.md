@@ -406,6 +406,73 @@ This three-layer approach ensures Copilot has the right context whether the deve
 - Debugging a running service (queries `/anax/catalog`)
 - Building a new contribution service from scratch (reads the starter's bundled instructions)
 
+#### 3.4.5 MCP Server for Copilot Agent Mode
+
+The metadata management platform adds a **fourth layer** — two-way tool access — on top of the three read-only layers above, via an MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) server. MCP support shipped in `margic/anax-metadata-platform:v0.3.0`.
+
+> **Note:** The metadata platform also ships a VS Code extension (`@anax.metadata` chat participant, §14.1 of the platform spec) that provides read-only Copilot Chat tools. That extension was built as an internal dev tool for building the platform's React frontend. It is not the general-purpose integration layer for consuming developers. In a future iteration, the extension will be refactored to use the MCP server as its backend — the extension will continue to own UX concerns (chat participant, system prompt, formatting) while the MCP server centralizes tool definitions.
+
+**MCP Capabilities:**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| Discovery | `list_models`, `get_model`, `list_decisions`, `get_decision`, `list_workflows`, `get_workflow`, `list_mappings`, `get_mapping`, `resolve_model`, `search_assets`, `get_related_assets` | Browse and read the full governance asset inventory |
+| Authoring | `create_model`, `create_decision`, `create_workflow`, `create_mapping` | Create new assets in `draft` status — human promotes to `active` |
+| Validation | `validate_model`, `validate_decision`, `validate_workflow`, `validate_mapping` | Validate asset structure before or after creation |
+
+Each MCP tool maps directly to an existing REST API endpoint on the metadata server — the MCP layer is a thin adapter, not new business logic.
+
+**Safety constraint:** All write tools force `status: "draft"` regardless of the caller's input. Copilot cannot create assets that are immediately active in the build pipeline. A human must review and promote every AI-generated asset via the metadata platform UI.
+
+**Transport:** SSE (Server-Sent Events) on the existing Express server at `/mcp/sse`, using the `@modelcontextprotocol/sdk` npm package.
+
+**VS Code configuration** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "anax-metadata": {
+      "type": "sse",
+      "url": "http://localhost:3001/mcp/sse"
+    }
+  }
+}
+```
+
+**"Generate metadata from metadata" workflow:**
+
+```
+Developer (VS Code, Copilot Agent Mode):
+  "Create a Child Support model similar to Tax Levy"
+         │
+         ▼
+Copilot calls list_models → discovers existing models
+Copilot calls get_model("tax-levy-order") → reads full JSON Schema
+         │
+         ▼
+Copilot generates a new model, adapted for Child Support
+         │
+         ▼
+Copilot calls create_model → draft status
+Copilot calls validate_model → tests with sample data
+         │
+         ▼
+Developer reviews in platform UI → promotes draft → active
+```
+
+This pattern applies to all four asset types. The full MCP tool specification is in [memo-mcp-server-spec.md](memo-mcp-server-spec.md).
+
+**Relationship to other layers:**
+
+| Layer | Mechanism | Direction | When |
+|-------|-----------|-----------|------|
+| 1 — Instructions | `copilot-instructions.md` | Read | Always (auto-loaded) |
+| 2 — Static catalog | `catalog.json` | Read | After build |
+| 3 — Runtime endpoint | `GET /anax/catalog` | Read | Running service |
+| 4 — MCP server | MCP tools on metadata server | Read + Write | Running metadata server |
+
+Layers 1–3 are provided by the starter. Layer 4 is provided by the metadata management platform.
+
 ### 3.5 Auto-Configuration Design
 
 The starter follows Spring Boot auto-configuration conventions:

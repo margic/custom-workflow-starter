@@ -396,6 +396,25 @@ After a build, `catalog.json` is in the build output. Copilot reads this file fr
 
 For MCP-integrated agents or Copilot agent mode with tool access, the running service can be queried at `/anax/catalog` to discover all operations dynamically.
 
+### Layer 4: MCP Server (Metadata Platform)
+
+When the metadata management platform is running (e.g., in the devcontainer), Copilot Agent Mode can interact with governance assets directly via MCP tools — browsing existing models, decisions, workflows, and mappings, creating new assets as drafts, and validating them with sample data.
+
+Add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "anax-metadata": {
+      "type": "sse",
+      "url": "http://localhost:3001/mcp/sse"
+    }
+  }
+}
+```
+
+This enables the "generate metadata from metadata" workflow — ask Copilot to create a new decision table modeled after an existing one, and it will read the original, generate a variant, create it as a draft, and validate it, all within a single conversation.
+
 ### Authoring Flow
 
 ```
@@ -411,6 +430,26 @@ Copilot reads catalog.json
          │
          ▼
 Copilot generates valid function definitions with correct URIs
+```
+
+### Asset Generation Flow (MCP)
+
+```
+Developer asks Copilot to create a new governance asset
+         │
+         ▼
+Copilot calls MCP list/get tools
+  → reads existing assets from the metadata server
+         │
+         ▼
+Copilot generates a new asset, adapted from existing ones
+         │
+         ▼
+Copilot calls MCP create tool → draft status
+Copilot calls MCP validate tool → tests with sample data
+         │
+         ▼
+Developer reviews in metadata platform UI → promotes draft → active
 ```
 
 ---

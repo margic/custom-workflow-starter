@@ -1,1 +1,25 @@
-// Dependencies added in Phase 2
+plugins {
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+        mavenBom "org.kie.kogito:kogito-bom:${kogitoVersion}"
+    }
+}
+
+dependencies {
+    api 'org.kie.kogito:kogito-api'
+    api 'org.kie.kogito:jbpm-flow'
+    api 'org.kie.kogito:process-workitems'
+
+    compileOnly 'org.kie.kogito:kogito-dmn'
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
+    compileOnly 'org.springframework:spring-context'
+    compileOnly 'org.springframework:spring-web'
+    compileOnly 'com.fasterxml.jackson.core:jackson-databind'
+    compileOnly 'jakarta.annotation:jakarta.annotation-api'
+
+    annotationProcessor 'org.springframework.boot:spring-boot-autoconfigure-processor'
+}

@@ -6,6 +6,8 @@
 
 ---
 
+> **Note on Phase 3:** Prompts 3.1–3.6 below provide a high-level overview of the Gradle plugin module. For implementation, follow the detailed [Phase 3 Specification](0007-phase3-plugin-spec.md) §8 checklist (items 3.1–3.13), which supersedes these prompts with confirmed API contracts, a `MetadataServerClient` abstraction, utility classes (`UriParser`, `SwJsonParser`), the `GenerateMcpConfigTask`, and a comprehensive test strategy.
+
 ## Overview
 
 This document provides a step-by-step prompt sequence for scaffolding the `custom-workflow-starter` repository using Copilot. Each prompt is self-contained with enough context for an AI agent to execute it correctly in a fresh conversation.
@@ -66,6 +68,10 @@ settings.gradle with four subprojects:
   - anax-kogito-spring-boot-starter
   - anax-kogito-codegen-plugin
   - anax-kogito-sample
+
+Also in settings.gradle, add a composite build inclusion for the plugin
+so the sample module can apply it by plugin ID during local development:
+  includeBuild('anax-kogito-codegen-plugin')
 
 Root build.gradle:
   - Apply 'java-library' to all subprojects except anax-kogito-codegen-plugin
@@ -550,11 +556,11 @@ Properties:
 
 Usage in consuming build.gradle:
   anaxKogito {
-      metadataServerUrl = 'http://localhost:3000'
+      metadataServerUrl = 'http://localhost:3001'
   }
 
 Or via environment variable:
-  export METADATA_SERVER_URL=http://localhost:3000
+  export METADATA_SERVER_URL=http://localhost:3001
 
 Package: com.anax.kogito.gradle
 ```
@@ -732,7 +738,7 @@ Apply plugins:
     buildSrc approach for local dev)
 
 anaxKogito {
-    metadataServerUrl = 'http://localhost:3000'  // metadata server for build-time assets
+    metadataServerUrl = 'http://localhost:3001'  // metadata server for build-time assets
 }
 
 Dependencies:

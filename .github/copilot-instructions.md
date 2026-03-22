@@ -90,10 +90,10 @@ The `resolveGovernanceAssets` task parses `.sw.json` `functions[]` arrays, extra
 
 | URI Pattern | Metadata Server Endpoint | Output |
 |-------------|--------------------------|--------|
-| `dmn://{namespace}/{modelName}` | `GET /api/decisions/{decisionId}` | `.dmn` file in `build/generated/resources/kogito/` |
-| `map://{mappingName}` | `GET /api/mappings/{mappingId}` | Jolt spec in `build/generated/resources/kogito/META-INF/anax/mappings/` |
+| `dmn://{namespace}/{modelName}` | Search: `GET /api/decisions?namespace=&name=&status=active` → Export: `GET /api/decisions/{decisionId}/export?format=dmn` | `.dmn` file in `build/generated/resources/kogito/` |
+| `map://{mappingName}` | `GET /api/mappings/{mappingId}/export?format=jolt` | Jolt spec in `build/generated/resources/kogito/META-INF/anax/mappings/` |
 
-`anax://` URIs reference local Spring beans — they are not fetched from the metadata server. The metadata server URL is configured via `anaxKogito.metadataServerUrl` in `build.gradle` or `METADATA_SERVER_URL` environment variable.
+`anax://` URIs reference local Spring beans — they are not fetched from the metadata server. The metadata server URL is configured via `anaxKogito.metadataServerUrl` in `build.gradle` or `METADATA_SERVER_URL` environment variable. See [Phase 3 Spec §2.2](docs/0007-phase3-plugin-spec.md) for the confirmed resolution algorithm.
 
 ## Project Documentation
 

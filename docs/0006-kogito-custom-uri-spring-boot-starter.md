@@ -166,8 +166,10 @@ This task bridges the Gradle build with the [Metadata Management Platform](canon
 
 | URI Pattern | Metadata Server Endpoint | Fetched Artifact |
 |-------------|--------------------------|------------------|
-| `dmn://{namespace}/{modelName}` | `GET /api/decisions/{decisionId}` | DMN XML → `build/generated/resources/kogito/{modelName}.dmn` |
+| `dmn://{namespace}/{modelName}` | `GET /api/decisions/{decisionId}` | DMN XML → `build/generated/resources/kogito/{decisionId}.dmn` |
 | `map://{mappingName}` | `GET /api/mappings/{mappingId}` | Jolt spec JSON → `build/generated/resources/kogito/META-INF/anax/mappings/{mappingName}.json` |
+
+> **Superseded:** The simplified endpoints above are a conceptual summary. The confirmed two-step resolution algorithm (search by namespace/name → export original artifact) is specified in [Phase 3 Spec §2.2](0007-phase3-plugin-spec.md). Use that document as the authoritative API contract during implementation.
 
 **Note:** `anax://` URIs reference local Spring beans — they are not resolved from the metadata server. Bean existence is validated at runtime by the Spring `ApplicationContext`, not at build time.
 
@@ -585,7 +587,7 @@ plugins {
 }
 
 anaxKogito {
-    metadataServerUrl = 'http://localhost:3000'  // or METADATA_SERVER_URL env var
+    metadataServerUrl = 'http://localhost:3001'  // or METADATA_SERVER_URL env var
 }
 
 dependencies {

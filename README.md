@@ -32,7 +32,7 @@ plugins {
 }
 
 anaxKogito {
-    metadataServerUrl = 'http://localhost:3000'  // or set METADATA_SERVER_URL env var
+    metadataServerUrl = 'http://localhost:3001'  // or set METADATA_SERVER_URL env var
 }
 
 dependencies {
@@ -325,7 +325,7 @@ Configure the plugin in `build.gradle`:
 
 ```gradle
 anaxKogito {
-    metadataServerUrl = 'http://localhost:3000'  // or set METADATA_SERVER_URL env var
+    metadataServerUrl = 'http://localhost:3001'  // or set METADATA_SERVER_URL env var
 }
 ```
 

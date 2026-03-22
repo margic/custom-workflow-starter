@@ -17,4 +17,23 @@ repositories {
     mavenLocal()
 }
 
-// Dependencies added in Phase 3
+gradlePlugin {
+    plugins {
+        anaxKogitoCodegen {
+            id = 'com.anax.kogito-codegen'
+            implementationClass = 'com.anax.kogito.gradle.AnaxKogitoCodegenPlugin'
+        }
+    }
+}
+
+dependencies {
+    implementation gradleApi()
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation gradleTestKit()
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}

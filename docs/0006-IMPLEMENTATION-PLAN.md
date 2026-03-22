@@ -6,6 +6,22 @@
 
 ---
 
+## Progress Tracker
+
+| Phase | Description | Status | Commit |
+|-------|-------------|--------|--------|
+| 0 | Repository Bootstrap | ✅ Done | `c04f9bf` |
+| 1 | Codegen Extensions Module | ✅ Done | `dce85b7` |
+| 2 | Spring Boot Starter Module | ✅ Done | `512c609` |
+| 3 | Gradle Plugin Module | ⏳ In progress | — |
+| 4 | Sample Application | ⬜ Not started | — |
+| 5 | Copilot Integration & Docs | ⬜ Not started | — |
+
+**Branch:** `feature/spring-boot-starter`
+**Last updated:** 2026-03-22
+
+---
+
 > **Note on Phase 3:** Prompts 3.1–3.6 below provide a high-level overview of the Gradle plugin module. For implementation, follow the detailed [Phase 3 Specification](0007-phase3-plugin-spec.md) §8 checklist (items 3.1–3.13), which supersedes these prompts with confirmed API contracts, a `MetadataServerClient` abstraction, utility classes (`UriParser`, `SwJsonParser`), the `GenerateMcpConfigTask`, and a comprehensive test strategy.
 
 ## Overview
@@ -46,9 +62,9 @@ The POC reference (`0006-POC-REFERENCE.md`) contains:
 
 ---
 
-## Phase 0: Repository Bootstrap
+## Phase 0: Repository Bootstrap ✅
 
-### Prompt 0.1 — Create the multi-module Gradle project
+### Prompt 0.1 — Create the multi-module Gradle project ✅ `c04f9bf`
 
 ```
 Create a new multi-module Gradle project at /workspaces/custom-workflow-starter with these specifications:
@@ -85,9 +101,9 @@ Do NOT add dependencies yet — those come in later prompts.
 
 ---
 
-## Phase 1: Codegen Extensions Module
+## Phase 1: Codegen Extensions Module ✅
 
-### Prompt 1.1 — Build file for codegen extensions
+### Prompt 1.1 — Build file for codegen extensions ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/build.gradle:
@@ -106,7 +122,7 @@ Import the Kogito BOM for version management:
 The jar must include the META-INF/services file so ServiceLoader discovers the handlers.
 ```
 
-### Prompt 1.2 — DmnFunctionTypeHandler
+### Prompt 1.2 — DmnFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/DmnFunctionTypeHandler.java
@@ -142,7 +158,7 @@ Use public static final constants for the parameter names:
   DMN_SCHEME = "dmn"
 ```
 
-### Prompt 1.3 — AnaxFunctionTypeHandler
+### Prompt 1.3 — AnaxFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/AnaxFunctionTypeHandler.java
@@ -166,7 +182,7 @@ Use public static final constants:
   ANAX_SCHEME = "anax"
 ```
 
-### Prompt 1.4 — MapFunctionTypeHandler
+### Prompt 1.4 — MapFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/MapFunctionTypeHandler.java
@@ -189,7 +205,7 @@ Use public static final constants:
   MAP_SCHEME = "map"
 ```
 
-### Prompt 1.5 — SPI registration file
+### Prompt 1.5 — SPI registration file ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/resources/META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler
@@ -200,7 +216,7 @@ com.anax.kogito.codegen.AnaxFunctionTypeHandler
 com.anax.kogito.codegen.MapFunctionTypeHandler
 ```
 
-### Prompt 1.6 — Verify codegen extensions compile
+### Prompt 1.6 — Verify codegen extensions compile ✅ `dce85b7`
 
 ```
 Run: gradle :anax-kogito-codegen-extensions:compileJava
@@ -209,9 +225,9 @@ Verify BUILD SUCCESSFUL with no errors.
 
 ---
 
-## Phase 2: Spring Boot Starter Module
+## Phase 2: Spring Boot Starter Module ✅
 
-### Prompt 2.1 — Build file for the starter
+### Prompt 2.1 — Build file for the starter ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/build.gradle:
@@ -237,7 +253,7 @@ Dependencies:
 This jar must NOT be a fat jar. It's consumed as a library dependency.
 ```
 
-### Prompt 2.2 — DmnWorkItemHandler
+### Prompt 2.2 — DmnWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/DmnWorkItemHandler.java
@@ -264,7 +280,7 @@ Do NOT use @Autowired — use constructor injection. The bean wiring
 happens in the auto-configuration class.
 ```
 
-### Prompt 2.3 — AnaxWorkItemHandler
+### Prompt 2.3 — AnaxWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxWorkItemHandler.java
@@ -290,7 +306,7 @@ Package: com.anax.kogito.autoconfigure
 Constructor injection, no @Autowired.
 ```
 
-### Prompt 2.4 — MapWorkItemHandler
+### Prompt 2.4 — MapWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/MapWorkItemHandler.java
@@ -328,7 +344,7 @@ Package: com.anax.kogito.autoconfigure
 Constructor injection, no @Autowired.
 ```
 
-### Prompt 2.5 — Auto-configuration class
+### Prompt 2.5 — Auto-configuration class ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxKogitoAutoConfiguration.java
@@ -366,7 +382,7 @@ Import:
   - org.kie.kogito.process.impl.DefaultWorkItemHandlerConfig
 ```
 
-### Prompt 2.6 — AnaxKogitoProperties
+### Prompt 2.6 — AnaxKogitoProperties ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxKogitoProperties.java
@@ -388,7 +404,7 @@ public class AnaxKogitoProperties {
 Package: com.anax.kogito.autoconfigure
 ```
 
-### Prompt 2.7 — CatalogModel
+### Prompt 2.7 — CatalogModel ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/CatalogModel.java
@@ -448,7 +464,7 @@ Java records representing the catalog.json structure:
 Package: com.anax.kogito.catalog
 ```
 
-### Prompt 2.8 — AnaxCatalogService
+### Prompt 2.8 — AnaxCatalogService ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/AnaxCatalogService.java
@@ -476,7 +492,7 @@ Package: com.anax.kogito.catalog
 Constructor injection: ObjectMapper, ApplicationContext, ResourceLoader
 ```
 
-### Prompt 2.9 — AnaxCatalogController
+### Prompt 2.9 — AnaxCatalogController ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/AnaxCatalogController.java
@@ -497,7 +513,7 @@ All endpoints return 200 with JSON. Inject AnaxCatalogService.
 Package: com.anax.kogito.catalog
 ```
 
-### Prompt 2.10 — AutoConfiguration.imports registration
+### Prompt 2.10 — AutoConfiguration.imports registration ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
@@ -506,7 +522,7 @@ Contents (single line):
 com.anax.kogito.autoconfigure.AnaxKogitoAutoConfiguration
 ```
 
-### Prompt 2.11 — Verify starter compiles
+### Prompt 2.11 — Verify starter compiles ✅ `512c609`
 
 ```
 Run: gradle :anax-kogito-spring-boot-starter:compileJava
@@ -515,9 +531,11 @@ Verify BUILD SUCCESSFUL.
 
 ---
 
-## Phase 3: Gradle Plugin Module
+## Phase 3: Gradle Plugin Module ⏳
 
-### Prompt 3.1 — Build file for the Gradle plugin
+> **Status:** In progress. Partial files created during previous session — see uncommitted changes in `anax-kogito-codegen-plugin/`. Follow [Phase 3 Specification §8](0007-phase3-plugin-spec.md) for the authoritative checklist.
+
+### Prompt 3.1 — Build file for the Gradle plugin ⏳
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/build.gradle:
@@ -724,7 +742,7 @@ Verify BUILD SUCCESSFUL.
 
 ## Phase 4: Sample Application
 
-### Prompt 4.1 — Sample build file
+### Prompt 4.1 — Sample build file ⬚
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-sample/build.gradle:
@@ -840,7 +858,7 @@ the hello-world workflow, and the greetingService bean.
 
 ## Phase 5: Copilot Integration & Documentation
 
-### Prompt 5.1 — Copilot instructions template
+### Prompt 5.1 — Copilot instructions template ⬚
 
 ````
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/.github/copilot-instructions.md

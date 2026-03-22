@@ -1,0 +1,52 @@
+{
+  "id": "hello-world",
+  "version": "1.0",
+  "specVersion": "0.8",
+  "name": "Hello World Workflow",
+  "description": "Demo workflow using anax:// custom function to invoke a Spring bean",
+  "start": "Greet",
+  "functions": [
+    {
+      "name": "greetFunction",
+      "type": "custom",
+      "operation": "anax://greetingService/greet"
+    },
+    {
+      "name": "logFunction",
+      "type": "custom",
+      "operation": "sysout"
+    }
+  ],
+  "states": [
+    {
+      "name": "Greet",
+      "type": "operation",
+      "actions": [
+        {
+          "functionRef": {
+            "refName": "greetFunction",
+            "arguments": {
+              "name": "${ .name }"
+            }
+          }
+        }
+      ],
+      "transition": "LogResult"
+    },
+    {
+      "name": "LogResult",
+      "type": "operation",
+      "actions": [
+        {
+          "functionRef": {
+            "refName": "logFunction",
+            "arguments": {
+              "message": "${ .greeting }"
+            }
+          }
+        }
+      ],
+      "end": true
+    }
+  ]
+}

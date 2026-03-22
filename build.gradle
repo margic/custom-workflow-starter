@@ -1,0 +1,30 @@
+subprojects {
+    group = project.property('group')
+    version = project.property('version')
+
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+
+    // Java 17 toolchain for all modules that apply a java plugin
+    plugins.withType(JavaPlugin) {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(17)
+            }
+        }
+    }
+
+    repositories {
+        mavenCentral()
+        mavenLocal()
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform {
+            def includeTags = project.findProperty('includeTags')
+            def excludeTags = project.findProperty('excludeTags')
+            if (includeTags) includeTags(includeTags.split(','))
+            if (excludeTags) excludeTags(excludeTags.split(','))
+        }
+    }
+}

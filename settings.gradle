@@ -1,0 +1,9 @@
+rootProject.name = 'custom-workflow-starter'
+
+include 'anax-kogito-codegen-extensions'
+include 'anax-kogito-spring-boot-starter'
+include 'anax-kogito-sample'
+
+// Composite build: the plugin is a separate build so it can be applied by plugin ID.
+// This also allows anax-kogito-sample to use `id 'com.anax.kogito-codegen'` during local dev.
+includeBuild('anax-kogito-codegen-plugin')

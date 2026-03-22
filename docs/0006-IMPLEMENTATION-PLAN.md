@@ -13,9 +13,9 @@
 | 0 | Repository Bootstrap | ✅ Done | `c04f9bf` |
 | 1 | Codegen Extensions Module | ✅ Done | `dce85b7` |
 | 2 | Spring Boot Starter Module | ✅ Done | `512c609` |
-| 3 | Gradle Plugin Module | ⏳ In progress | — |
-| 4 | Sample Application | ⬜ Not started | — |
-| 5 | Copilot Integration & Docs | ⬜ Not started | — |
+| 3 | Gradle Plugin Module | ✅ Done | `19b4d5c` |
+| 4 | Sample Application | ✅ Done | `52da409` |
+| 5 | Copilot Integration & Docs | ✅ Done | *(this commit)* |
 
 **Branch:** `feature/spring-boot-starter`
 **Last updated:** 2026-03-22
@@ -531,11 +531,11 @@ Verify BUILD SUCCESSFUL.
 
 ---
 
-## Phase 3: Gradle Plugin Module ⏳
+## Phase 3: Gradle Plugin Module ✅
 
-> **Status:** In progress. Partial files created during previous session — see uncommitted changes in `anax-kogito-codegen-plugin/`. Follow [Phase 3 Specification §8](0007-phase3-plugin-spec.md) for the authoritative checklist.
+> **Status:** Complete. All checklist items 3.1–3.13 implemented. See [Phase 3 Specification §8](0007-phase3-plugin-spec.md) for reference.
 
-### Prompt 3.1 — Build file for the Gradle plugin ⏳
+### Prompt 3.1 — Build file for the Gradle plugin ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/build.gradle:
@@ -559,7 +559,7 @@ Dependencies:
   // via a 'kogitoCodegen' configuration it creates in the consuming project
 ```
 
-### Prompt 3.2 — AnaxKogitoExtension
+### Prompt 3.2 — AnaxKogitoExtension ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/AnaxKogitoExtension.java
@@ -583,7 +583,7 @@ Or via environment variable:
 Package: com.anax.kogito.gradle
 ```
 
-### Prompt 3.3 — ResolveGovernanceAssetsTask
+### Prompt 3.3 — ResolveGovernanceAssetsTask ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/ResolveGovernanceAssetsTask.java
@@ -626,7 +626,7 @@ Use java.net.http.HttpClient for HTTP requests (Java 11+ API, no external deps).
 Package: com.anax.kogito.gradle
 ```
 
-### Prompt 3.4 — AnaxKogitoCodegenPlugin
+### Prompt 3.4 — AnaxKogitoCodegenPlugin ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/AnaxKogitoCodegenPlugin.java
@@ -676,7 +676,7 @@ apply(Project project):
 Package: com.anax.kogito.gradle
 ```
 
-### Prompt 3.5 — CatalogManifestTask
+### Prompt 3.5 — CatalogManifestTask ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/CatalogManifestTask.java
@@ -731,7 +731,7 @@ scan, so missing beans in the static manifest are still discoverable at
 runtime.
 ```
 
-### Prompt 3.6 — Verify plugin compiles
+### Prompt 3.6 — Verify plugin compiles ✅ `19b4d5c`
 
 ```
 Run: gradle :anax-kogito-codegen-plugin:compileJava
@@ -740,9 +740,9 @@ Verify BUILD SUCCESSFUL.
 
 ---
 
-## Phase 4: Sample Application
+## Phase 4: Sample Application ✅
 
-### Prompt 4.1 — Sample build file ⬚
+### Prompt 4.1 — Sample build file ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-sample/build.gradle:
@@ -773,7 +773,7 @@ add to settings.gradle:
 Or use composite builds. The prompt for settings.gradle should handle this.
 ```
 
-### Prompt 4.2 — Sample application class
+### Prompt 4.2 — Sample application class ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/java/com/example/demo/DemoApplication.java
@@ -793,7 +793,7 @@ public class GreetingService {
 }
 ```
 
-### Prompt 4.3 — Sample workflow
+### Prompt 4.3 — Sample workflow ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/resources/hello-world.sw.json
@@ -813,7 +813,7 @@ fetch it at build time. The hello-world.sw.json is sufficient for a
 minimal demo without the metadata server (it only uses anax://).
 ```
 
-### Prompt 4.4 — Sample application.yml
+### Prompt 4.4 — Sample application.yml ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/resources/application.yml
@@ -833,7 +833,7 @@ kogito:
     version-strategy: workflow
 ```
 
-### Prompt 4.5 — Build and run the sample
+### Prompt 4.5 — Build and run the sample ✅ `52da409`
 
 ```
 Run:
@@ -856,9 +856,9 @@ the hello-world workflow, and the greetingService bean.
 
 ---
 
-## Phase 5: Copilot Integration & Documentation
+## Phase 5: Copilot Integration & Documentation ✅
 
-### Prompt 5.1 — Copilot instructions template ⬚
+### Prompt 5.1 — Copilot instructions template ✅
 
 ````
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/.github/copilot-instructions.md
@@ -910,7 +910,7 @@ At runtime, query `GET /anax/catalog` for the full inventory of:
 
 ```
 
-### Prompt 5.2 — README.md
+### Prompt 5.2 — README.md ✅
 
 ```
 

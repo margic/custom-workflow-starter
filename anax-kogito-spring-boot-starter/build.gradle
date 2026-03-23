@@ -12,7 +12,12 @@ dependencyManagement {
 dependencies {
     api 'org.kie.kogito:kogito-api'
     api 'org.kie.kogito:jbpm-flow'
+    api 'org.kie.kogito:jbpm-flow-builder'
     api 'org.kie.kogito:process-workitems'
+    api 'org.kie.kogito:kogito-serverless-workflow-builder'
+
+    // Spring Boot process runtime auto-configuration
+    implementation 'org.jbpm:jbpm-spring-boot-starter'
 
     compileOnly 'org.kie.kogito:kogito-dmn'
     compileOnly 'org.springframework.boot:spring-boot-autoconfigure'

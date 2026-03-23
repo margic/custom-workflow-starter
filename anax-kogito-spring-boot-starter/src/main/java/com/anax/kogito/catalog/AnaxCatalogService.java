@@ -28,8 +28,8 @@ public class AnaxCatalogService {
     private CatalogModel.Catalog catalog;
 
     public AnaxCatalogService(ObjectMapper objectMapper,
-                              ApplicationContext applicationContext,
-                              ResourceLoader resourceLoader) {
+            ApplicationContext applicationContext,
+            ResourceLoader resourceLoader) {
         this.objectMapper = objectMapper;
         this.applicationContext = applicationContext;
         this.resourceLoader = resourceLoader;
@@ -79,20 +79,20 @@ public class AnaxCatalogService {
                         "dmn://{namespace}/{modelName}",
                         List.of(
                                 new CatalogModel.ParameterEntry("DmnNamespace", "DMN model namespace", "uri"),
-                                new CatalogModel.ParameterEntry("ModelName", "DMN model name", "uri")
-                        ), "DmnWorkItemHandler"),
+                                new CatalogModel.ParameterEntry("ModelName", "DMN model name", "uri")),
+                        "DmnWorkItemHandler"),
                 new CatalogModel.SchemeEntry("anax", "Invoke a Spring bean method",
                         "anax://{beanName}/{methodName}",
                         List.of(
                                 new CatalogModel.ParameterEntry("BeanName", "Spring bean name", "uri"),
-                                new CatalogModel.ParameterEntry("MethodName", "Method to invoke (default: execute)", "uri")
-                        ), "AnaxWorkItemHandler"),
+                                new CatalogModel.ParameterEntry("MethodName", "Method to invoke (default: execute)",
+                                        "uri")),
+                        "AnaxWorkItemHandler"),
                 new CatalogModel.SchemeEntry("map", "Apply a Jolt data transformation",
                         "map://{mappingName}",
                         List.of(
-                                new CatalogModel.ParameterEntry("MappingName", "Jolt mapping spec name", "uri")
-                        ), "MapWorkItemHandler")
-        );
+                                new CatalogModel.ParameterEntry("MappingName", "Jolt mapping spec name", "uri")),
+                        "MapWorkItemHandler"));
         return new CatalogModel.Catalog("1.0", null, schemes,
                 List.of(), List.of(), List.of(), List.of());
     }

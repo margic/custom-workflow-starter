@@ -13,16 +13,20 @@ import org.kie.kogito.serverless.workflow.parser.types.WorkItemTypeHandler;
  * (instead of an empty lambda) for any {@code type: custom} function whose
  * {@code operation} uses the {@code dmn://} URI scheme.
  *
- * <p>URI format: {@code dmn://namespace/Model Name}
+ * <p>
+ * URI format: {@code dmn://namespace/Model Name}
  * <ul>
- *   <li>namespace — the DMN model namespace (e.g. {@code com.anax.decisions})</li>
- *   <li>Model Name — the DMN model name (e.g. {@code Order Type Routing})</li>
+ * <li>namespace — the DMN model namespace (e.g.
+ * {@code com.anax.decisions})</li>
+ * <li>Model Name — the DMN model name (e.g. {@code Order Type Routing})</li>
  * </ul>
  *
- * <p>Registered via SPI:
+ * <p>
+ * Registered via SPI:
  * {@code META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler}
  *
- * <p>At runtime the work item is dispatched to
+ * <p>
+ * At runtime the work item is dispatched to
  * {@code com.anax.kogito.autoconfigure.DmnWorkItemHandler}.
  */
 public class DmnFunctionTypeHandler extends WorkItemTypeHandler {

@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
  * {@code DmnFunctionTypeHandler} during codegen. Any additional work-item
  * parameters are forwarded as DMN input variables.
  *
- * Registered as the {@code "dmn"} handler via {@link AnaxKogitoAutoConfiguration}.
+ * Registered as the {@code "dmn"} handler via
+ * {@link AnaxKogitoAutoConfiguration}.
  */
 public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
 

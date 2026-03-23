@@ -25,7 +25,8 @@ import java.util.Optional;
  * Jolt specs are placed at {@code META-INF/anax/mappings/{mappingName}.json}
  * by the {@code resolveGovernanceAssets} Gradle task at build time.
  *
- * Registered as the {@code "map"} handler via {@link AnaxKogitoAutoConfiguration}.
+ * Registered as the {@code "map"} handler via
+ * {@link AnaxKogitoAutoConfiguration}.
  */
 public class MapWorkItemHandler extends DefaultKogitoWorkItemHandler {
 

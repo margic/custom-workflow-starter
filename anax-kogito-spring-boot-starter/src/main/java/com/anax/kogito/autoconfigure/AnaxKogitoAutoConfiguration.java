@@ -3,6 +3,7 @@ package com.anax.kogito.autoconfigure;
 import org.kie.kogito.decision.DecisionModels;
 import org.kie.kogito.process.impl.DefaultWorkItemHandlerConfig;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -31,7 +32,7 @@ public class AnaxKogitoAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnClass(name = "org.kie.kogito.decision.DecisionModels")
+    @ConditionalOnBean(DecisionModels.class)
     public DmnWorkItemHandler dmnWorkItemHandler(DecisionModels decisionModels) {
         return new DmnWorkItemHandler(decisionModels);
     }

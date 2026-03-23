@@ -19,7 +19,8 @@ import java.util.Optional;
 
 /**
  * HTTP-based implementation of MetadataServerClient.
- * Uses java.net.http.HttpClient (Java 11+) — no external dependencies beyond Gson.
+ * Uses java.net.http.HttpClient (Java 11+) — no external dependencies beyond
+ * Gson.
  */
 public class HttpMetadataServerClient implements MetadataServerClient {
 
@@ -32,7 +33,8 @@ public class HttpMetadataServerClient implements MetadataServerClient {
 
     public HttpMetadataServerClient(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/")
-                ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+                ? baseUrl.substring(0, baseUrl.length() - 1)
+                : baseUrl;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
@@ -95,8 +97,7 @@ public class HttpMetadataServerClient implements MetadataServerClient {
                             .timeout(Duration.ofSeconds(5))
                             .method("HEAD", HttpRequest.BodyPublishers.noBody())
                             .build(),
-                    HttpResponse.BodyHandlers.discarding()
-            );
+                    HttpResponse.BodyHandlers.discarding());
             return response.statusCode() < 500;
         } catch (Exception e) {
             return false;
@@ -117,8 +118,7 @@ public class HttpMetadataServerClient implements MetadataServerClient {
                     getStringOrNull(obj, "name"),
                     getStringOrNull(obj, "namespace"),
                     getStringOrNull(obj, "version"),
-                    getStringOrNull(obj, "status")
-            ));
+                    getStringOrNull(obj, "status")));
         }
         return results;
     }
@@ -137,8 +137,7 @@ public class HttpMetadataServerClient implements MetadataServerClient {
                             .header("Accept", "application/json")
                             .GET()
                             .build(),
-                    HttpResponse.BodyHandlers.ofString()
-            );
+                    HttpResponse.BodyHandlers.ofString());
         } catch (Exception e) {
             throw new MetadataServerException(
                     "Failed to connect to metadata server: " + e.getMessage(), 0, url);
@@ -153,8 +152,7 @@ public class HttpMetadataServerClient implements MetadataServerClient {
                             .timeout(REQUEST_TIMEOUT)
                             .GET()
                             .build(),
-                    HttpResponse.BodyHandlers.ofByteArray()
-            );
+                    HttpResponse.BodyHandlers.ofByteArray());
         } catch (Exception e) {
             throw new MetadataServerException(
                     "Failed to connect to metadata server: " + e.getMessage(), 0, url);

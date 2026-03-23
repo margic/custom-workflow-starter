@@ -1,11 +1,13 @@
 package com.anax.kogito.gradle;
 
 /**
- * Parses custom URI schemes (dmn://, anax://, map://) from sw.json function operations.
+ * Parses custom URI schemes (dmn://, anax://, map://) from sw.json function
+ * operations.
  */
 public final class UriParser {
 
-    private UriParser() {}
+    private UriParser() {
+    }
 
     public static ParsedUri parse(String operation) {
         if (operation == null || operation.isEmpty()) {
@@ -66,5 +68,6 @@ public final class UriParser {
      * For anax://: primary=beanName, secondary=methodName
      * For map://: primary=mappingName, secondary=null
      */
-    public record ParsedUri(String scheme, String primary, String secondary) {}
+    public record ParsedUri(String scheme, String primary, String secondary) {
+    }
 }

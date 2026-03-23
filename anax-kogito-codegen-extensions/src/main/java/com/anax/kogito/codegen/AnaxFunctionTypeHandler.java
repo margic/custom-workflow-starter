@@ -13,16 +13,20 @@ import org.kie.kogito.serverless.workflow.parser.types.WorkItemTypeHandler;
  * for any {@code type: custom} function whose {@code operation} uses the
  * {@code anax://} URI scheme.
  *
- * <p>URI format: {@code anax://beanName/methodName}
+ * <p>
+ * URI format: {@code anax://beanName/methodName}
  * <ul>
- *   <li>beanName — the Spring bean name (e.g. {@code helloService})</li>
- *   <li>methodName — the method to invoke; defaults to {@code execute} if omitted</li>
+ * <li>beanName — the Spring bean name (e.g. {@code helloService})</li>
+ * <li>methodName — the method to invoke; defaults to {@code execute} if
+ * omitted</li>
  * </ul>
  *
- * <p>Registered via SPI:
+ * <p>
+ * Registered via SPI:
  * {@code META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler}
  *
- * <p>At runtime the work item is dispatched to
+ * <p>
+ * At runtime the work item is dispatched to
  * {@code com.anax.kogito.autoconfigure.AnaxWorkItemHandler}.
  */
 public class AnaxFunctionTypeHandler extends WorkItemTypeHandler {

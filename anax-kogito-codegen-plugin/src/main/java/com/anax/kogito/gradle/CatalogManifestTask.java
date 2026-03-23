@@ -18,7 +18,8 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Generates META-INF/anax/catalog.json from resolved assets and workflow definitions.
+ * Generates META-INF/anax/catalog.json from resolved assets and workflow
+ * definitions.
  *
  * Includes:
  * - Scheme definitions (dmn://, anax://, map://)
@@ -54,7 +55,8 @@ public abstract class CatalogManifestTask extends DefaultTask {
         // Workflows from .sw.json files
         catalog.add("workflows", scanWorkflows(resourcePath));
 
-        // Spring beans (static placeholder — augmented at runtime by AnaxCatalogService)
+        // Spring beans (static placeholder — augmented at runtime by
+        // AnaxCatalogService)
         catalog.add("springBeans", new JsonArray());
 
         // Form schemas (placeholder for future)
@@ -71,23 +73,23 @@ public abstract class CatalogManifestTask extends DefaultTask {
 
         schemes.add(buildScheme("dmn", "Evaluate a DMN decision model in-process",
                 "dmn://{namespace}/{modelName}", "DmnWorkItemHandler",
-                new String[]{"DmnNamespace", "DMN model namespace", "uri"},
-                new String[]{"ModelName", "DMN model name", "uri"}));
+                new String[] { "DmnNamespace", "DMN model namespace", "uri" },
+                new String[] { "ModelName", "DMN model name", "uri" }));
 
         schemes.add(buildScheme("anax", "Invoke a Spring bean method",
                 "anax://{beanName}/{methodName}", "AnaxWorkItemHandler",
-                new String[]{"BeanName", "Spring bean name", "uri"},
-                new String[]{"MethodName", "Method to invoke (default: execute)", "uri"}));
+                new String[] { "BeanName", "Spring bean name", "uri" },
+                new String[] { "MethodName", "Method to invoke (default: execute)", "uri" }));
 
         schemes.add(buildScheme("map", "Apply a Jolt data transformation",
                 "map://{mappingName}", "MapWorkItemHandler",
-                new String[]{"MappingName", "Jolt mapping spec name", "uri"}));
+                new String[] { "MappingName", "Jolt mapping spec name", "uri" }));
 
         return schemes;
     }
 
     private JsonObject buildScheme(String scheme, String description, String uriPattern,
-                                   String handler, String[]... params) {
+            String handler, String[]... params) {
         JsonObject obj = new JsonObject();
         obj.addProperty("scheme", scheme);
         obj.addProperty("description", description);

@@ -18,10 +18,12 @@ import java.util.stream.Stream;
  */
 public final class SwJsonParser {
 
-    private SwJsonParser() {}
+    private SwJsonParser() {
+    }
 
     /**
-     * Scan a directory for .sw.json files and extract all custom function operations.
+     * Scan a directory for .sw.json files and extract all custom function
+     * operations.
      */
     public static List<String> extractCustomOperations(Path resourceDir) throws IOException {
         if (!Files.isDirectory(resourceDir)) {

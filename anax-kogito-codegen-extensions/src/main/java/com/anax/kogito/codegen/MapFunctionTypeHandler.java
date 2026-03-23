@@ -13,16 +13,19 @@ import org.kie.kogito.serverless.workflow.parser.types.WorkItemTypeHandler;
  * for any {@code type: custom} function whose {@code operation} uses the
  * {@code map://} URI scheme.
  *
- * <p>URI format: {@code map://mappingName}
+ * <p>
+ * URI format: {@code map://mappingName}
  * <ul>
- *   <li>mappingName — the mapping identifier on the metadata server
- *       (e.g. {@code x9-field-mapping})</li>
+ * <li>mappingName — the mapping identifier on the metadata server
+ * (e.g. {@code x9-field-mapping})</li>
  * </ul>
  *
- * <p>Registered via SPI:
+ * <p>
+ * Registered via SPI:
  * {@code META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler}
  *
- * <p>At runtime the work item is dispatched to
+ * <p>
+ * At runtime the work item is dispatched to
  * {@code com.anax.kogito.autoconfigure.MapWorkItemHandler}.
  */
 public class MapFunctionTypeHandler extends WorkItemTypeHandler {

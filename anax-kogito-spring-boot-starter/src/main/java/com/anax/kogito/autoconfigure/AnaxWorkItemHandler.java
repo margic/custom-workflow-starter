@@ -21,9 +21,11 @@ import java.util.Optional;
  * the remaining work-item parameters as a {@code Map<String, Object>}.
  *
  * The target method must have the signature:
+ * 
  * <pre>{@code Map<String, Object> methodName(Map<String, Object> params)}</pre>
  *
- * Registered as the {@code "anax"} handler via {@link AnaxKogitoAutoConfiguration}.
+ * Registered as the {@code "anax"} handler via
+ * {@link AnaxKogitoAutoConfiguration}.
  */
 public class AnaxWorkItemHandler extends DefaultKogitoWorkItemHandler {
 
@@ -67,8 +69,12 @@ public class AnaxWorkItemHandler extends DefaultKogitoWorkItemHandler {
                     "anax:// handler invocation failed for " + beanName + "/" + methodName, e);
         }
 
-        manager.completeWorkItem(workItem.getStringId(),
-                result != null ? result : Collections.emptyMap(),
+        // Wrap the bean result under "Result" key — the generated work item
+        // output data association maps this key to the process variable
+        Map<String, Object> output = new HashMap<>();
+        output.put("Result", result != null ? result : Collections.emptyMap());
+
+        manager.completeWorkItem(workItem.getStringId(), output,
                 transition.policies().toArray(Policy[]::new));
         return Optional.empty();
     }

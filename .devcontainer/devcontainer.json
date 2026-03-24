@@ -4,6 +4,17 @@
   "service": "devcontainer",
   "workspaceFolder": "/workspaces/custom-workflow-starter",
   "customizations": {
+    "codespaces": {
+      "repositories": {
+        "margic/codespaces-react": {
+          "permissions": {
+            "issues": "write",
+            "contents": "write",
+            "pull_requests": "write"
+          }
+        }
+      }
+    },
     "vscode": {
       "extensions": [
         "redhat.java",

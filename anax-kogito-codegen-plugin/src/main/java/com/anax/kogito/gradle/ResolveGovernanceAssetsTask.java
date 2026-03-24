@@ -14,14 +14,22 @@ import org.gradle.api.tasks.TaskAction;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Parses .sw.json workflow definitions, extracts dmn:// and map:// URIs,
  * and fetches the referenced assets from the metadata server.
  *
- * Build fails if any referenced asset is missing.
+ * If a local .dmn file in src/main/resources/ has a matching model name,
+ * the server fetch is skipped and the local file is used instead.
+ *
+ * Build fails if any referenced asset is missing (and no local override exists).
  */
 public abstract class ResolveGovernanceAssetsTask extends DefaultTask {
 
@@ -39,6 +47,12 @@ public abstract class ResolveGovernanceAssetsTask extends DefaultTask {
         String metadataUrl = getMetadataServerUrl().get();
         Path resourcePath = Path.of(getResourceDir().get());
         Path outputPath = getOutputDir().get().getAsFile().toPath();
+
+        // Pre-scan local .dmn files — local files override server fetch
+        Map<String, Path> localDmnByName = scanLocalDmnFiles(resourcePath);
+        if (!localDmnByName.isEmpty()) {
+            getLogger().lifecycle("Found {} local DMN file(s): {}", localDmnByName.size(), localDmnByName.keySet());
+        }
 
         MetadataServerClient client = MetadataServerClientFactory.create(metadataUrl);
 
@@ -60,7 +74,7 @@ public abstract class ResolveGovernanceAssetsTask extends DefaultTask {
             }
 
             switch (uri.scheme()) {
-                case "dmn" -> resolveDmn(client, uri, outputPath);
+                case "dmn" -> resolveDmn(client, uri, outputPath, localDmnByName);
                 case "map" -> resolveMap(client, uri, outputPath);
                 case "anax" -> getLogger().lifecycle("  anax://{}/{} — local Spring bean (no fetch)",
                         uri.primary(), uri.secondary());
@@ -69,9 +83,19 @@ public abstract class ResolveGovernanceAssetsTask extends DefaultTask {
         }
     }
 
-    private void resolveDmn(MetadataServerClient client, UriParser.ParsedUri uri, Path outputDir) throws IOException {
+    private void resolveDmn(MetadataServerClient client, UriParser.ParsedUri uri, Path outputDir,
+            Map<String, Path> localDmnByName) throws IOException {
         String namespace = uri.primary();
         String modelName = uri.secondary();
+
+        // Check for local override before making any server call
+        Path localFile = localDmnByName.get(modelName);
+        if (localFile != null) {
+            getLogger().lifecycle("  dmn://{}/{} — using local file {} (skipping server fetch)",
+                    namespace, modelName, localFile);
+            return;
+        }
+
         getLogger().lifecycle("  Resolving dmn://{}/{}", namespace, modelName);
 
         List<DecisionSearchResult> results = client.findDecisions(namespace, modelName);
@@ -115,5 +139,34 @@ public abstract class ResolveGovernanceAssetsTask extends DefaultTask {
         Files.createDirectories(mappingFile.getParent());
         Files.write(mappingFile, joltSpec.get());
         getLogger().lifecycle("    → wrote {}", mappingFile);
+    }
+
+    private static final Pattern DEFINITIONS_NAME = Pattern.compile(
+            "<definitions[^>]+name\\s*=\\s*\"([^\"]+)\"");
+
+    /**
+     * Scan src/main/resources for .dmn files and extract the definitions name attribute.
+     * Returns a map of DMN model name → local file path.
+     */
+    private Map<String, Path> scanLocalDmnFiles(Path resourceDir) throws IOException {
+        Map<String, Path> result = new HashMap<>();
+        if (!Files.isDirectory(resourceDir)) {
+            return result;
+        }
+        try (Stream<Path> files = Files.walk(resourceDir)) {
+            files.filter(p -> p.toString().endsWith(".dmn"))
+                    .forEach(p -> {
+                        try {
+                            String content = Files.readString(p);
+                            Matcher m = DEFINITIONS_NAME.matcher(content);
+                            if (m.find()) {
+                                result.put(m.group(1), p);
+                            }
+                        } catch (IOException e) {
+                            getLogger().warn("Failed to read local DMN file: {}", p);
+                        }
+                    });
+        }
+        return result;
     }
 }

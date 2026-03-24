@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "anax-metadata": {
+      "type": "sse",
+      "url": "http://metadata-platform:3001/mcp/sse"
+    }
+  }
+}

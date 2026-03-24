@@ -9,7 +9,7 @@ services:
       - redpanda
 
   metadata-platform:
-    image: ghcr.io/margic/codespaces-react:sha-dfd05fb
+    image: ghcr.io/margic/codespaces-react:sha-a8ea932
     ports:
       - "3001:3001"
 

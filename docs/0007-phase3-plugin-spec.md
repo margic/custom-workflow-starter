@@ -22,22 +22,27 @@ It also includes a **comprehensive test strategy** covering all four modules.
 
 ## 1.1 Governance Asset Lifecycle
 
-The metadata server is a **governance asset store**. The lifecycle is:
+The metadata server is a **governance asset store**. The lifecycle follows a three-phase model:
 
 ```
-1. Author creates a governance resource (DMN model, Jolt mapping spec, etc.)
-2. Author publishes the resource to the metadata server (out of band / out of scope)
-   └── The metadata server stores the ORIGINAL artifact (e.g., raw .dmn XML file)
-   └── The metadata server may also parse it for display/search (JSON representation)
-3. Workflow developer references the resource via custom URI in .sw.json:
-   └── "operation": "dmn://com.anax.decisions/Order Type Routing"
-4. At build time, the Gradle plugin fetches the ORIGINAL artifact from the metadata server
-   └── Kogito codegen needs actual DMN XML — the JSON representation is not sufficient
-5. Kogito codegen processes the .dmn file alongside the .sw.json
-6. At runtime, the generated process evaluates the DMN model in-process
+1. Author creates/updates governance resources via Copilot + MCP tools (primary)
+   or via the metadata server REST API / UI (fallback)
+   └── MCP write tools force status: "draft" — human promotes to "active"
+2. Developer exports the resource (DMN XML, Jolt spec) to the local project
+   └── Copilot can write files directly into src/main/resources/
+   └── Developer commits governance assets to git
+3. At build time, the Gradle plugin reads .dmn and .sw.json from src/main/resources/
+   └── Self-contained build — no metadata server dependency
+   └── Kogito codegen processes the files alongside .sw.json definitions
+4. At runtime, the generated process evaluates governance assets in-process
+5. On startup, the Spring Boot starter publishes the catalog to the metadata server
+   └── POST /api/registrations — enables observability and drift detection
+   └── Metadata server compares registrations against governed inventory
 ```
 
-This is an iterative cycle: new governance resources are developed, published to the metadata server, then consumed by future workflows — including workflows that call other workflows. Publishing to the metadata server is **out of scope** for this project; consumption at build time is in scope.
+> **Design change (March 2026):** The original design had `resolveGovernanceAssets` fetching assets from the metadata server at build time. This was replaced with a **self-contained build** model where governance assets are committed to `src/main/resources/`. The metadata server connection is now established at **runtime** via the starter's registration service. This eliminates the build-time dependency on the metadata server, making CI/CD pipelines fully independent.
+
+The URI resolution schema (§2) and metadata server client (§4) remain documented below as **reference** — they describe the API contract that the MCP tools use for authoring, and that the runtime registration feature will use for the registration endpoint. The `ResolveGovernanceAssetsTask` described in the original design is **no longer part of the build pipeline**.
 
 ---
 

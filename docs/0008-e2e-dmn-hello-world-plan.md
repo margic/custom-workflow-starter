@@ -1,7 +1,7 @@
 # Feature Plan: End-to-End DMN Decision in Hello World Workflow
 
 **Date:** March 23, 2026  
-**Updated:** March 24, 2026  
+**Updated:** March 24, 2026 — revised for self-contained build + runtime registration architecture  
 **Branch:** `feature/spring-boot-starter`  
 **Objective:** Validate the full Copilot-assisted developer experience by adding a governed DMN decision to the existing hello-world workflow, exercising every system component end-to-end.  
 **Metadata Server Repo:** `margic/codespaces-react`  
@@ -22,14 +22,15 @@ This single scenario exercises every component in the architecture:
 | # | Component | What Gets Tested |
 |---|-----------|------------------|
 | 1 | **MCP Server** | Copilot discovers existing assets, creates a new decision via MCP tools |
-| 2 | **Metadata Server** | Decision stored, activated, DMN XML exported via REST API |
-| 3 | **Gradle Plugin — resolveGovernanceAssets** | Parses `dmn://` URI from `.sw.json`, fetches DMN XML from metadata server |
+| 2 | **Metadata Server** | Decision stored and managed as the governance record of truth |
+| 3 | **Local DMN authoring** | DMN XML authored (via Copilot or MCP export) and committed to `src/main/resources/` |
 | 4 | **Gradle Plugin — generateKogitoSources** | Kogito codegen processes the `.dmn` file alongside the updated `.sw.json` |
 | 5 | **Codegen Extensions — DmnFunctionTypeHandler** | Emits `WorkItemNode` with `workName("dmn")`, `DmnNamespace`, `ModelName` params |
 | 6 | **Spring Boot Starter — DmnWorkItemHandler** | Evaluates the DMN decision at runtime using `DecisionModels` |
 | 7 | **Auto-Configuration** | `@ConditionalOnBean(DecisionModels.class)` activates now that DMN is present |
 | 8 | **drools-decisions-spring-boot-starter** | Provides `DecisionModels` bean and DMN runtime auto-configuration |
-| 9 | **End-to-end workflow** | POST request → workflow engine → DMN evaluation → greeting returned |
+| 9 | **Runtime Registration** | On startup, starter publishes catalog to metadata server for observability |
+| 10 | **End-to-end workflow** | POST request → workflow engine → DMN evaluation → greeting returned |
 
 ## 3. Preconditions
 
@@ -39,7 +40,9 @@ Before starting, verify:
 - [x] Metadata server is up at `http://metadata-platform:3001` inside container (health check: 200 OK)
 - [x] MCP server is connected in VS Code — **fixed:** URL changed from `localhost:3001` to `metadata-platform:3001` in `.vscode/mcp.json`
 - [x] MCP SSE transport works — VS Code falls back from Streamable HTTP to legacy SSE (cosmetic 404, then 19 tools discovered)
-- [ ] Current hello-world workflow executes: `POST http://localhost:8085/hello-world` → `{"greeting": "Hello, Kogito!"}`
+- [ ] DMN file committed to `src/main/resources/` (restore `greeting-decision.bak` → `greeting-decision.dmn`)
+- [ ] `application.yml` configured with `anax.metadata-server.url` for runtime registration
+- [ ] Current hello-world workflow executes: `POST http://localhost:8085/hello-world` → greeting returned
 - [ ] Branch `feature/spring-boot-starter` is clean (commit pending changes first)
 
 ## 4. Developer Journey
@@ -84,9 +87,16 @@ The developer drives each step. Copilot assists at every stage. This is the expe
 
 ### Step 2: Author the Decision — "Create a greeting decision" ✅ COMPLETE
 
-**Developer action:** Ask Copilot to create a DMN decision for the even/odd greeting.
+**Developer action:** Ask Copilot to create a DMN decision on the metadata server AND commit the DMN XML locally.
 
-**Result:** Copilot invoked MCP `create_decision` and created:
+> **Design change (March 2026):** The architecture no longer fetches DMN files from
+> the metadata server at build time. Builds are self-contained — DMN files must be
+> committed to `src/main/resources/`. The metadata server is the governance record
+> of truth; the local file is the build artifact. Both must be kept in sync.
+
+**Phase A — Create governance record via MCP:**
+
+Copilot invoked MCP `create_decision` and created:
 
 | Property | Value |
 |----------|-------|
@@ -102,40 +112,42 @@ The developer drives each step. Copilot assists at every stage. This is the expe
 
 **URI for workflow:** `dmn://com.example.decisions/Greeting Decision`
 
+**Phase B — Commit DMN XML locally:**
+
+The DMN file must be committed to the project for self-contained builds. Options:
+1. **Copilot authors the DMN XML** directly based on the decision specification
+2. **Export from metadata server** via `GET /api/decisions/{id}/export?format=dmn` (if available)
+3. **Developer writes it manually** (least preferred)
+
+The file is committed as `src/main/resources/greeting-decision.dmn`.
+
+> **Current state:** The DMN XML exists as `greeting-decision.bak` — restore it to `.dmn`.
+
 **Validated:**
 - ✅ MCP write tools work
 - ✅ Metadata server creates the decision correctly
 - ✅ Decision ID auto-derived from name (`greeting-decision`)
-
-**Open question — DMN XML generation:**
-The `resolveGovernanceAssets` task needs the **original DMN XML** from the export endpoint (`GET /api/decisions/{id}/export?format=dmn`). Two possibilities:
-1. The metadata server **generates** DMN XML from the structured representation (inputs, outputs, rules, hit policy) — ideal
-2. The metadata server requires a **separate DMN file upload** — we'd need to author the XML manually and upload it
-
-**Status:** v0.3.2 of the metadata server addresses this. To be verified after container rebuild.
+- ✅ DMN XML committed locally for self-contained build
 
 ---
 
-### Step 3: Activate the Decision — 🔄 BLOCKED → UNBLOCKED (v0.3.3)
+### Step 3: Activate the Decision ✅ COMPLETE (governance only)
 
-**Developer action:** Promote the decision from `draft` to `active`.
+**Developer action:** Promote the decision from `draft` to `active` on the metadata server.
 
-The Gradle plugin's `resolveGovernanceAssets` filters by `status=active`. A draft decision will 404.
+> **Design change:** Activation is a **governance concern only** — it marks the
+> decision as production-ready in the metadata server's registry. It does NOT
+> gate the build. The build reads from `src/main/resources/`, not the server.
 
-**Gaps discovered (v0.3.2):**
-1. No `update_decision` MCP tool exists — filed as **[margic/codespaces-react#4](https://github.com/margic/codespaces-react/issues/4)**
-2. No REST `PATCH /api/decisions/:id` endpoint exists — filed as **[margic/codespaces-react#6](https://github.com/margic/codespaces-react/issues/6)**
-
-**Resolution:** Metadata server v0.3.3 expected to add update support. Container rebuild required.
-
-**What should happen (after v0.3.3):**
+**What should happen:**
 - Copilot invokes MCP `update_decision(decisionId: "greeting-decision", status: "active")`
 - Verify: `GET /api/decisions?namespace=com.example.decisions&name=Greeting Decision&status=active` returns 1 result
+- At runtime, when the starter registers its catalog, the metadata server can compare the registered DMN model against its `active` record for drift detection
 
 **What we're validating:**
 - Status lifecycle works (draft → active)
-- Search-by-namespace+name returns the activated decision
-- Export endpoint returns DMN XML for the active decision
+- Governance record is consistent with the committed local file
+- Foundation for runtime drift detection
 
 ---
 
@@ -166,64 +178,62 @@ The Gradle plugin's `resolveGovernanceAssets` filters by `status=active`. A draf
 
 ---
 
-### Step 5: Configure the Build for Real Metadata Server
+### Step 5: Configure Runtime Registration *(NEW)*
 
-**Developer action:** Switch from stub to real metadata server.
+**Developer action:** Add metadata server URL to `application.yml` for runtime catalog registration.
 
-**Change in `anax-kogito-sample/build.gradle`:**
+> **Design change:** There is no build-time metadata server configuration. The
+> `anaxKogito { metadataServerUrl }` extension property has been removed. Instead,
+> the starter registers its catalog with the metadata server at runtime.
+
+**Change in `anax-kogito-sample/src/main/resources/application.yml`:**
+
+```yaml
+anax:
+  metadata-server:
+    url: http://metadata-platform:3001
+```
+
+**Also: Remove `metadataServerUrl` from `build.gradle`** if still present:
 
 ```groovy
+// REMOVE this block — no longer used
 anaxKogito {
-    metadataServerUrl = providers.environmentVariable('METADATA_SERVER_URL')
-            .orElse('http://metadata-platform:3001')  // was 'stub'
+    metadataServerUrl = ...
 }
 ```
 
-Or set the environment variable:
-```bash
-export METADATA_SERVER_URL=http://metadata-platform:3001
-```
-
 **What we're validating:**
-- Plugin configuration accepts the real server URL
-- Environment variable override works
+- Runtime registration is configured via `application.yml`, not `build.gradle`
+- Build succeeds without any metadata server configuration
 
 ---
 
-### Step 6: Build — Resolve + Generate
+### Step 6: Build — Generate + Compile
 
 **Developer action:** Run the Gradle build.
 
 ```bash
-# Step 6a: Resolve governance assets from metadata server
-./gradlew :anax-kogito-sample:resolveGovernanceAssets
-
-# Step 6b: Generate Kogito sources (includes DMN codegen)
+# Step 6a: Generate Kogito sources (includes DMN codegen)
 ./gradlew :anax-kogito-sample:generateKogitoSources
 
-# Step 6c: Full build
+# Step 6b: Full build
 ./gradlew :anax-kogito-sample:build
 ```
 
-**What should happen in 6a:**
-- Plugin parses `hello-world.sw.json`
-- Finds `dmn://com.example.decisions/Greeting Decision`
-- Calls `GET /api/decisions?namespace=com.example.decisions&name=Greeting Decision&status=active`
-- Gets `decisionId`, calls `GET /api/decisions/{decisionId}/export?format=dmn`
-- Writes `.dmn` file to `build/generated/resources/kogito/`
-- Also finds `anax://greetingService/getCurrentMinute` → logs "local Spring bean (no fetch)"
+> **Design change:** There is no `resolveGovernanceAssets` step. The DMN file is
+> already committed to `src/main/resources/`. The build is fully self-contained.
 
-**What should happen in 6b:**
+**What should happen in 6a:**
 - Kogito codegen discovers `decisions` generator (was previously skipped — no `.dmn` files)
-- Decisions generator is now **enabled** (`.dmn` file present in generated resources)
+- Decisions generator is now **enabled** (`.dmn` file present in `src/main/resources/`)
 - Generates DMN evaluation Java classes
 - Process generator picks up updated `.sw.json` with `dmn://` function reference
 - `DmnFunctionTypeHandler` SPI emits `WorkItemNode` with `workName("dmn")`
 
 **What we're validating:**
-- Metadata server HTTP client works end-to-end
-- DMN file is fetched and placed correctly for codegen
-- Codegen discovers and processes the DMN model
+- **No metadata server dependency at build time** — build succeeds with server down
+- Codegen discovers and processes the committed DMN model
 - DmnFunctionTypeHandler produces correct work-item node
 - Build succeeds with no errors
 
@@ -242,6 +252,22 @@ export METADATA_SERVER_URL=http://metadata-platform:3001
 ./gradlew :anax-kogito-sample:bootRun
 ```
 
+**7a — Verify runtime registration:**
+
+On startup (`ApplicationReadyEvent`), the starter should POST its catalog to the metadata server:
+- Check application logs for: `"Registering catalog with metadata server at http://metadata-platform:3001"`
+- If registration succeeds: `"Catalog registered successfully"`
+- If registration fails (server not ready, endpoint not yet implemented): `"Catalog registration failed (non-fatal)"` — app continues normally
+
+```bash
+# Verify catalog endpoint is available
+curl http://localhost:8085/anax/catalog | jq .
+```
+
+The catalog should list the `dmn://com.example.decisions/Greeting Decision` model, the `anax://greetingService/*` beans, and the `hello-world` workflow.
+
+**7b — Verify workflow execution:**
+
 ```bash
 # Test the workflow
 curl -X POST http://localhost:8085/hello-world \
@@ -259,9 +285,11 @@ curl -X POST http://localhost:8085/hello-world \
 
 **What we're validating:**
 - `DmnWorkItemHandler` activates (was previously conditional-skipped)
-- DMN decision model loads from generated code
+- DMN decision model loads from committed `.dmn` in `src/main/resources/`
 - Decision evaluation produces correct output
 - Workflow completes with greeting from DMN (not from the old GreetingService hardcoded logic)
+- Runtime registration fires on startup (fire-and-forget — failure doesn't block the app)
+- Catalog endpoint exposes the full asset inventory
 
 **Verification:**
 - Run the request multiple times, observe the greeting flips as the clock minute changes
@@ -275,24 +303,33 @@ curl -X POST http://localhost:8085/hello-world \
 |-----------|---------------|
 | MCP discovery works | Copilot returns decision list from metadata server |
 | MCP authoring works | Decision created via Copilot, visible in metadata server |
-| DMN export works | `resolveGovernanceAssets` downloads `.dmn` file |
+| DMN committed locally | `src/main/resources/greeting-decision.dmn` exists and matches governance record |
+| Build is self-contained | `./gradlew build` succeeds **without** metadata server running |
 | Codegen processes DMN | `generateKogitoSources` log shows `decisions` generator enabled, produces Java files |
 | Build succeeds | `./gradlew build` exits 0 |
 | DMN handler activates | Boot log shows `DmnWorkItemHandler` registered |
+| Runtime registration fires | Boot log shows catalog registration attempt (success or graceful failure) |
+| Catalog endpoint works | `GET /anax/catalog` returns JSON with DMN model listed |
 | Correct greeting returned | POST returns `"Hello, it's even!"` or `"Hello, it's odd!"` based on current minute |
 
 ## 6. Known Gaps & Risks
 
 > **Note:** We own both repos (custom-workflow-starter and metadata management platform). Gaps marked with **[FIX]** are tasks we implement ourselves on the metadata server — not cross-team dependencies.
 
+> **Design change (March 2026):** The architecture no longer uses `resolveGovernanceAssets`
+> to fetch DMN files at build time. Builds are self-contained. Several gaps from the
+> original plan are now moot.
+
 | # | Gap | Impact | Resolution |
 |---|-----|--------|------------|
-| 1 | **DMN XML generation from structured decision** — unclear if metadata server auto-generates DMN XML from the `create_decision` MCP tool output, or requires a separate file upload | Blocks Step 6a — no DMN XML to export | **[DISCOVER]** Test during Step 2. If the metadata server doesn't auto-generate DMN XML: **[FIX]** either add DMN generation to the metadata server, or author DMN XML with Copilot and upload via REST |
-| 2 | **Decision activation via MCP** — the MCP spec defines `create_decision` but not `update_decision` or `activate_decision` | Blocks Step 3 — can't promote draft → active | **[FIXED]** Filed [margic/codespaces-react#4](https://github.com/margic/codespaces-react/issues/4). Resolved in metadata server v0.3.2 — adds `update_decision` MCP tool |
-| 3 | **DMN file naming** — `resolveGovernanceAssets` names the file `{decisionId}.dmn`; Kogito codegen must discover it | Could cause codegen to miss the file | **[VERIFY]** during Step 6. Fix naming in plugin if needed |
+| ~~1~~ | ~~DMN XML generation from structured decision~~ | ~~Blocks Step 6a~~ | **MOOT** — DMN XML is committed locally by the developer/Copilot. The metadata server's export capability is a convenience, not a build dependency |
+| ~~2~~ | ~~Decision activation via MCP~~ | ~~Blocks Step 3~~ | **RESOLVED** — `update_decision` MCP tool exists. Activation is governance-only, does not gate builds |
+| 3 | **DMN file naming** — committed file must be discovered by Kogito codegen | Could cause codegen to miss the file | **[VERIFY]** during Step 6. Kogito scans `src/main/resources/` for `*.dmn` files |
 | 4 | **Workflow data flow** — DMN decision output keys must match what the workflow expects in `workflowdata` | Greeting might not propagate correctly | **[VERIFY]** during Step 7. May need `actionDataFilter` in `.sw.json` |
 | 5 | **GreetingService change** — adding `getCurrentMinute()` method; the current `greet()` method becomes unused or needs removal | Minor — cleanup concern | Refactor incrementally during Step 4 |
-| 6 | **Decision status filtering** — `resolveGovernanceAssets` sends `?status=active`; metadata server must support this query parameter | 404 or empty result if not supported | **[VERIFY]** during Step 1 discovery. **[FIX]** on metadata server if not supported |
+| ~~6~~ | ~~Decision status filtering in resolveGovernanceAssets~~ | ~~404 or empty result~~ | **MOOT** — no build-time server dependency |
+| 7 | **Runtime registration endpoint** — `POST /api/registrations` does not yet exist on the metadata server | Registration will gracefully fail (fire-and-forget) | **[FILED]** [margic/codespaces-react#15](https://github.com/margic/codespaces-react/issues/15) — app starts normally regardless |
+| 8 | **Local/server drift** — committed DMN file may diverge from metadata server record | Governance risk, not build risk | Runtime registration + drift detection will catch this once endpoint is implemented |
 
 ## 7. Execution Sequence
 
@@ -307,12 +344,16 @@ curl -X POST http://localhost:8085/hello-world \
 │  Step 2: Author Decision                                             │
 │  ┌──────────┐     MCP: create_decision     ┌──────────────────┐    │
 │  │ Developer │ ──── Copilot Agent ────────> │ Metadata Server  │    │
-│  │           │ <─── decisionId + draft ──── │                  │    │
-│  └──────────┘                               └──────────────────┘    │
+│  │           │ <─── decisionId + draft ──── │ (governance rec) │    │
+│  │           │                               └──────────────────┘    │
+│  │           │     Commit DMN XML          ┌──────────────────┐    │
+│  │           │ ──── Copilot / manual ────> │ src/main/resources│    │
+│  └──────────┘                               │ greeting-dec.dmn │    │
+│                                              └──────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Step 3: Activate Decision                                           │
-│  ┌──────────┐     REST or UI               ┌──────────────────┐    │
-│  │ Developer │ ──── PATCH status=active ──> │ Metadata Server  │    │
+│  Step 3: Activate Decision (governance only)                         │
+│  ┌──────────┐     MCP or REST              ┌──────────────────┐    │
+│  │ Developer │ ──── status=active ────────> │ Metadata Server  │    │
 │  └──────────┘                               └──────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Step 4: Update Workflow                                             │
@@ -321,20 +362,18 @@ curl -X POST http://localhost:8085/hello-world \
 │  │           │ ──── GreetingService.java ─> │                  │    │
 │  └──────────┘                               └──────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Step 5: Configure Build                                             │
+│  Step 5: Configure Runtime Registration                              │
 │  ┌──────────┐                               ┌──────────────────┐    │
-│  │ Developer │ ──── build.gradle ─────────> │ metadataServerUrl│    │
-│  └──────────┘                               └──────────────────┘    │
+│  │ Developer │ ──── application.yml ──────> │ anax.metadata-   │    │
+│  │           │      (remove build.gradle    │ server.url       │    │
+│  │           │       metadataServerUrl)      └──────────────────┘    │
+│  └──────────┘                                                        │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Step 6: Build                                                       │
-│  ┌──────────────────┐                       ┌──────────────────┐    │
-│  │ Gradle Plugin     │                       │ Metadata Server  │    │
-│  │                    │  GET /api/decisions   │                  │    │
-│  │ resolveAssets ─────┼─────────────────────>│                  │    │
-│  │                    │  GET ../export?dmn    │                  │    │
-│  │ generateSources ──>│  .dmn file           │                  │    │
-│  │                    │                       └──────────────────┘    │
-│  │ Kogito codegen ───>│  Java sources                                │
+│  Step 6: Build (self-contained — no server dependency)               │
+│  ┌──────────────────┐                                                │
+│  │ Gradle Plugin     │                                                │
+│  │                    │  Reads src/main/resources/*.dmn               │
+│  │ generateSources ──>│  Kogito codegen (DMN + process)              │
 │  │ compile ──────────>│  .class files                                │
 │  └──────────────────┘                                                │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -344,6 +383,14 @@ curl -X POST http://localhost:8085/hello-world \
 │  │           │ <── greeting ───── │  → GetCurrentMinute (anax)  │   │
 │  └──────────┘                     │  → EvaluateGreeting (dmn)   │   │
 │                                    │  → LogResult (sysout)       │   │
+│                                    │                              │   │
+│  On startup (ApplicationReadyEvent):                              │   │
+│  ┌────────────────────────────┐   POST /api/registrations         │   │
+│  │ MetadataServerRegistration │ ──────────────────────────────>  │   │
+│  │ Service (fire-and-forget)  │   ┌──────────────────┐           │   │
+│  └────────────────────────────┘   │ Metadata Server  │           │   │
+│                                    │ (observability)  │           │   │
+│                                    └──────────────────┘           │   │
 │                                    └────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -352,12 +399,15 @@ curl -X POST http://localhost:8085/hello-world \
 
 If all steps pass, this validates:
 - The **full Copilot-assisted developer experience** for adding governed decisions to workflows
-- The **metadata server → build → runtime** pipeline works end-to-end
+- The **self-contained build model** — no metadata server required at build time
+- The **Author → Build → Register lifecycle** works end-to-end
 - The **starter abstracts all Kogito complexity** — developer never touches `org.kie.kogito` directly
-- The **three-phase model** (author in metadata server → resolve at build time → execute at runtime) is sound
+- **Runtime registration** fires on startup (graceful failure until `POST /api/registrations` is implemented on the metadata server)
 
 **Next actions after success:**
-- Commit the updated workflow + bean changes
+- Commit the updated workflow + bean changes + restored `.dmn` file
+- Remove `metadataServerUrl` from `build.gradle` (and `resolveGovernanceAssets` task if still registered)
+- Implement `MetadataServerRegistrationService` in the starter (Prompts 2.12–2.14 in implementation plan)
 - Document any gaps discovered and file issues
 - Consider adding a `map://` function to the same workflow (tests the Jolt transformation path)
 - Write a reproducible integration test tagged `@Tag("devcontainer")`

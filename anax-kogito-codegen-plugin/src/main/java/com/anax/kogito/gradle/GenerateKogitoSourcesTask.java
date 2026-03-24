@@ -19,9 +19,11 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Collection;
 import java.util.Map;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 /**
  * Runs Kogito code generation via reflective invocation.
@@ -83,6 +85,12 @@ public abstract class GenerateKogitoSourcesTask extends DefaultTask {
             Path projectBase = getProject().getProjectDir().toPath().toAbsolutePath();
             Path outputSources = getOutputSourceDir().get().getAsFile().toPath().toAbsolutePath();
             Path outputResources = getOutputResourceDir().get().getAsFile().toPath().toAbsolutePath();
+
+            // Stage resolved DMN files into build/resources/main/ so Kogito's AppPaths can
+            // discover them.
+            // Kogito scans src/main/resources and build/resources/main but NOT
+            // build/generated/resources/kogito.
+            stageResolvedDmnFiles(outputResources, projectBase.resolve("build/resources/main"));
 
             // Load Kogito classes reflectively from the codegen classpath
             Class<?> kogitoGAVClass = cl.loadClass(
@@ -179,6 +187,31 @@ public abstract class GenerateKogitoSourcesTask extends DefaultTask {
             } catch (IOException ignored) {
                 // best-effort cleanup
             }
+        }
+    }
+
+    /**
+     * Copy .dmn files from the generated resources directory into
+     * build/resources/main
+     * so that Kogito's AppPaths file-system scan discovers them during codegen.
+     */
+    private void stageResolvedDmnFiles(Path generatedResDir, Path targetDir) throws IOException {
+        if (!Files.isDirectory(generatedResDir)) {
+            return;
+        }
+        try (Stream<Path> files = Files.walk(generatedResDir)) {
+            files.filter(p -> p.toString().endsWith(".dmn"))
+                    .forEach(dmn -> {
+                        try {
+                            Path relative = generatedResDir.relativize(dmn);
+                            Path target = targetDir.resolve(relative);
+                            Files.createDirectories(target.getParent());
+                            Files.copy(dmn, target, StandardCopyOption.REPLACE_EXISTING);
+                            getLogger().lifecycle("  Staged {} for Kogito codegen", relative);
+                        } catch (IOException e) {
+                            throw new RuntimeException("Failed to stage DMN for codegen: " + dmn, e);
+                        }
+                    });
         }
     }
 }

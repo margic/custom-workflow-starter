@@ -1,6 +1,6 @@
 # Custom Workflow Spring Boot Starter
 
-> Build event-driven CNCF Serverless Workflows with custom URI schemes, Kogito codegen, build-time asset resolution from a metadata server, and a Copilot-discoverable metadata catalog.
+> Build event-driven CNCF Serverless Workflows with custom URI schemes, Kogito codegen, and a Copilot-discoverable metadata catalog. Self-contained builds with runtime registration to the metadata server for observability and drift detection.
 
 **Java 17** · **Spring Boot 3.3.7** · **Kogito 10.1.0** · **Gradle 8.10+** · **CNCF Serverless Workflow spec v0.8**
 
@@ -11,6 +11,8 @@
 The Custom Workflow Spring Boot Starter is a development platform for building **contribution services** — Spring Boot microservices that execute event-driven workflows authored as CNCF Serverless Workflow JSON definitions.
 
 It extends the Kogito runtime with three custom URI schemes (`dmn://`, `anax://`, `map://`) that let workflow authors invoke DMN decisions, Spring beans, and Jolt data transformations directly from `.sw.json` files — without writing Java glue code.
+
+Governance assets (DMN models, Jolt mapping specs) are authored via Copilot + MCP tools connected to the metadata management platform, committed to `src/main/resources/`, and read locally at build time. Builds are fully self-contained with zero external service dependencies. At runtime, the starter registers the catalog with the metadata server for observability and drift detection.
 
 The starter also generates a **metadata catalog** — a machine-readable inventory of available operations, rules, workflows, and beans — that enables GitHub Copilot (and other AI coding assistants) to generate valid workflow definitions on the first attempt.
 
@@ -164,7 +166,7 @@ The Gradle plugin handles Kogito code generation automatically. Spring Boot auto
 | Module                            | Artifact                                   | Purpose                                                                                                                                                  |
 | --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `anax-kogito-codegen-extensions`  | `com.anax:anax-kogito-codegen-extensions`  | Build-time SPI — teaches Kogito codegen to recognize `dmn://`, `anax://`, `map://` URI schemes and emit `WorkItemNode` entries in generated process code |
-| `anax-kogito-spring-boot-starter` | `com.anax:anax-kogito-spring-boot-starter` | Runtime auto-configuration — registers work-item handlers for each URI scheme, provides the metadata catalog REST endpoint                               |
+| `anax-kogito-spring-boot-starter` | `com.anax:anax-kogito-spring-boot-starter` | Runtime auto-configuration — registers work-item handlers for each URI scheme, provides the metadata catalog REST endpoint, registers with the metadata server for observability |
 | `anax-kogito-codegen-plugin`      | `com.anax:anax-kogito-codegen-plugin`      | Gradle plugin — encapsulates `generateKogitoSources` task, classpath wiring, BOM management, and `catalog.json` manifest generation                      |
 | `anax-kogito-sample`              | — (not published)                          | Example application demonstrating all features                                                                                                           |
 
@@ -180,7 +182,13 @@ The Gradle plugin handles Kogito code generation automatically. Spring Boot auto
                    │  (Module 1)   │                    │    anax handler  │
                    │               │                    │    map handler   │
                    │  catalog.json │                    │    catalog API   │
-                   └──────────────┘                    └──────────────────┘
+                   └──────────────┘                    │    registration  │
+                                                        │        │         │
+                                                        └────────┬─────────┘
+                                                                │
+                                                                ▼
+                                                        Metadata Server
+                                                        (observability)
 ```
 
 ---
@@ -213,7 +221,7 @@ Evaluates a DMN decision model that is bundled in the same application.
 1. At build time, `DmnFunctionTypeHandler` parses the URI and emits a `WorkItemNode` with `workName("dmn")` and parameters `DmnNamespace` and `ModelName`.
 2. At runtime, `DmnWorkItemHandler` uses Kogito's `DecisionModels` API to evaluate the DMN model in-process. All input variables from the workflow data are passed to the DMN context. Decision results are merged back into the workflow data.
 
-**Requirements:** Add `org.kie.kogito:kogito-dmn` to your dependencies. Place `.dmn` files in `src/main/resources/`.
+**Requirements:** Add `org.kie.kogito:kogito-dmn` to your dependencies. Place `.dmn` files in `src/main/resources/`. DMN models are authored via Copilot + MCP tools and committed to git.
 
 ---
 
@@ -271,15 +279,14 @@ Applies a [Jolt](https://github.com/bazaarvoice/jolt) transformation spec fetche
 
 | Segment       | Description                                    |
 | ------------- | ---------------------------------------------- |
-| `mappingName` | Mapping identifier on the metadata server      |
+| `mappingName` | Mapping identifier — Jolt spec file committed in `src/main/resources/META-INF/anax/mappings/` |
 
 **How it works:**
 
-1. At build time, `resolveGovernanceAssets` fetches the Jolt spec from `GET /api/mappings/{mappingName}` on the metadata server and places it at `META-INF/anax/mappings/{mappingName}.json` on the classpath.
-2. At build time, `MapFunctionTypeHandler` parses the URI and emits a `WorkItemNode` with `workName("map")` and parameter `MappingName`.
-3. At runtime, `MapWorkItemHandler` loads the Jolt spec from the classpath and applies the transformation.
+1. At build time, `MapFunctionTypeHandler` parses the URI and emits a `WorkItemNode` with `workName("map")` and parameter `MappingName`.
+2. At runtime, `MapWorkItemHandler` loads the Jolt spec from the classpath (`META-INF/anax/mappings/{mappingName}.json`) and applies the transformation.
 
-**Note:** The initial `MapWorkItemHandler` implementation is a stub — the Jolt execution engine will be wired in a later iteration. The stub establishes the URI pattern and metadata server fetch pipeline.
+**Note:** Jolt specs are committed at `src/main/resources/META-INF/anax/mappings/{mappingName}.json`. The initial `MapWorkItemHandler` implementation is a stub — the Jolt execution engine will be wired in a later iteration.
 
 ---
 
@@ -358,6 +365,49 @@ The starter auto-configures a REST API under `/anax/catalog`:
 | `GET /anax/catalog/beans`     | Spring beans callable via `anax://` with method signatures |
 
 The runtime endpoint augments the static manifest with a live `ApplicationContext` scan, so beans added after the last build are still discoverable.
+
+---
+
+## Runtime Registration
+
+The starter can register with the [Metadata Management Platform](docs/canonical-metadata-server.md) on application startup, enabling runtime observability and drift detection.
+
+### What gets registered
+
+On `ApplicationReadyEvent`, the starter sends a `POST /api/registrations` to the metadata server with:
+
+- **Catalog** — all schemes, DMN models, workflows, and Spring beans the service uses
+- **Instance metadata** — application name, version, host, port, startup timestamp
+
+### Why register
+
+| Capability | Description |
+|-----------|-------------|
+| **Observability** | Real-time visibility of which governance assets (DMN models, mappings) are deployed across services |
+| **Drift detection** | The metadata server compares registered assets against the governed inventory — flags ungoverned assets in use or governed assets not deployed |
+| **Service catalog** | Discover which services use which governance assets |
+| **Heartbeat** | Optional periodic re-registration detects stale/down services |
+
+### Configuration
+
+```yaml
+anax:
+  metadata-server:
+    url: http://metadata-platform:3001          # required to enable registration
+    registration:
+      enabled: true                             # default: true when url is set
+      heartbeat-interval: 60s                   # optional periodic re-registration
+```
+
+Or via environment variable:
+
+```bash
+METADATA_SERVER_URL=http://metadata-platform:3001
+```
+
+### Failure handling
+
+Registration is **fire-and-forget**. If the metadata server is unreachable, the failure is logged at WARN level but the application starts normally. The service is fully functional without the metadata server.
 
 ---
 
@@ -458,10 +508,13 @@ Developer reviews in metadata platform UI → promotes draft → active
 
 All configuration is under the `anax` prefix in `application.yml`:
 
-| Property                        | Type      | Default | Description                                                         |
-| ------------------------------- | --------- | ------- | ------------------------------------------------------------------- |
-| `anax.catalog.enabled`          | `boolean` | `true`  | Enable/disable the `/anax/catalog` REST endpoint                    |
-| `anax.catalog.form-schemas-url` | `String`  | —       | Optional URL to an external forms-service for form schema discovery |
+| Property                                     | Type       | Default | Description                                                         |
+| -------------------------------------------- | ---------- | ------- | ------------------------------------------------------------------- |
+| `anax.catalog.enabled`                       | `boolean`  | `true`  | Enable/disable the `/anax/catalog` REST endpoint                    |
+| `anax.catalog.form-schemas-url`              | `String`   | —       | Optional URL to an external forms-service for form schema discovery |
+| `anax.metadata-server.url`                   | `String`   | —       | Metadata server URL — enables runtime registration when set         |
+| `anax.metadata-server.registration.enabled`  | `boolean`  | `true`  | Enable/disable registration (only applies when URL is set)          |
+| `anax.metadata-server.registration.heartbeat-interval` | `Duration` | —  | Optional periodic re-registration interval (e.g., `60s`)           |
 
 **Example `application.yml`:**
 
@@ -477,6 +530,10 @@ anax:
   catalog:
     enabled: true
     form-schemas-url: http://forms-service:8083/api/forms
+  metadata-server:
+    url: http://metadata-platform:3001
+    registration:
+      heartbeat-interval: 60s
 
 kogito:
   workflow:
@@ -490,6 +547,9 @@ kogito:
 anax:
   catalog:
     enabled: false
+  metadata-server:
+    registration:
+      enabled: false    # or simply don't set anax.metadata-server.url
 ```
 
 ---

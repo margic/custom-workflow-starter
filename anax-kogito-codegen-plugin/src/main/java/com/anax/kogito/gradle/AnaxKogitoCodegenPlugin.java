@@ -3,6 +3,8 @@ package com.anax.kogito.gradle;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.file.DuplicatesStrategy;
+import org.gradle.api.tasks.Copy;
 import org.gradle.api.tasks.SourceSetContainer;
 
 /**
@@ -143,8 +145,9 @@ public class AnaxKogitoCodegenPlugin implements Plugin<Project> {
         project.getTasks().named("compileJava", task -> {
             task.dependsOn("generateKogitoSources");
         });
-        project.getTasks().named("processResources", task -> {
+        project.getTasks().named("processResources", Copy.class, task -> {
             task.dependsOn("generateKogitoSources", "generateCatalogManifest", "generateMcpConfig");
+            task.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
         });
     }
 }

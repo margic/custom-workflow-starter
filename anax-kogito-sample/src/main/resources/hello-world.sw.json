@@ -3,13 +3,18 @@
     "version": "1.0",
     "specVersion": "0.8",
     "name": "Hello World Workflow",
-    "description": "Demo workflow using anax:// custom function to invoke a Spring bean",
-    "start": "Greet",
+    "description": "Demo workflow using anax://, dmn://, and sysout custom functions",
+    "start": "GetCurrentMinute",
     "functions": [
         {
-            "name": "greetFunction",
+            "name": "getCurrentMinuteFunction",
             "type": "custom",
-            "operation": "anax://greetingService/greet"
+            "operation": "anax://greetingService/getCurrentMinute"
+        },
+        {
+            "name": "greetingDecisionFunction",
+            "type": "custom",
+            "operation": "dmn://com.example.decisions/Greeting Decision"
         },
         {
             "name": "logFunction",
@@ -19,14 +24,26 @@
     ],
     "states": [
         {
-            "name": "Greet",
+            "name": "GetCurrentMinute",
             "type": "operation",
             "actions": [
                 {
                     "functionRef": {
-                        "refName": "greetFunction",
+                        "refName": "getCurrentMinuteFunction"
+                    }
+                }
+            ],
+            "transition": "EvaluateGreeting"
+        },
+        {
+            "name": "EvaluateGreeting",
+            "type": "operation",
+            "actions": [
+                {
+                    "functionRef": {
+                        "refName": "greetingDecisionFunction",
                         "arguments": {
-                            "name": "${ .name }"
+                            "currentMinute": "${ .currentMinute }"
                         }
                     }
                 }

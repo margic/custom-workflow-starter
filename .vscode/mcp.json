@@ -2,7 +2,7 @@
     "servers": {
         "anax-metadata": {
             "type": "sse",
-            "url": "http://localhost:3001/mcp/sse"
+            "url": "http://metadata-platform:3001/mcp/sse"
         }
     }
 }

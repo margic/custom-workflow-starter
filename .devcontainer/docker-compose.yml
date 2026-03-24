@@ -9,7 +9,7 @@ services:
       - redpanda
 
   metadata-platform:
-    image: margic/anax-metadata-platform:v0.3.1
+    image: ghcr.io/margic/codespaces-react:sha-dfd05fb
     ports:
       - "3001:3001"
 

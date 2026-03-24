@@ -43,5 +43,8 @@
       "onAutoForward": "silent"
     }
   },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
   "postCreateCommand": "java -version && bash -i -c 'sdk install gradle'"
 }

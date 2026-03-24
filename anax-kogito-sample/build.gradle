@@ -12,17 +12,12 @@ dependencyManagement {
 
 anaxKogito {
     metadataServerUrl = providers.environmentVariable('METADATA_SERVER_URL')
-            .orElse('stub')
+            .orElse('http://metadata-platform:3001')
 }
 
 dependencies {
     implementation project(':anax-kogito-spring-boot-starter')
     implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-validation'
-
-    // Annotations used by Kogito-generated REST resources
-    implementation 'io.swagger.core.v3:swagger-annotations:2.2.20'
-    implementation 'org.eclipse.microprofile.openapi:microprofile-openapi-api:3.1.1'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

@@ -58,11 +58,16 @@ public class DmnWorkItemHandler extends DefaultKogitoWorkItemHandler {
         DMNContext ctx = model.newContext(inputs);
         DMNResult result = model.evaluateAll(ctx);
 
-        Map<String, Object> outputs = result.getDecisionResults().stream()
+        Map<String, Object> dmnOutputs = result.getDecisionResults().stream()
                 .filter(dr -> dr.getEvaluationStatus() == DMNDecisionResult.DecisionEvaluationStatus.SUCCEEDED)
                 .collect(Collectors.toMap(
                         DMNDecisionResult::getDecisionName,
                         dr -> dr.getResult() != null ? dr.getResult() : ""));
+
+        // Wrap under "Result" key — the generated work item output data
+        // association maps this key to the process variable
+        Map<String, Object> outputs = new HashMap<>();
+        outputs.put("Result", dmnOutputs);
 
         manager.completeWorkItem(workItem.getStringId(), outputs,
                 transition.policies().toArray(Policy[]::new));

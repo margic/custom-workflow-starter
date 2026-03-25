@@ -1,0 +1,6 @@
+dependencies {
+    implementation platform("org.kie.kogito:kogito-bom:${kogitoVersion}")
+
+    compileOnly 'org.kie.kogito:kogito-serverless-workflow-builder'
+    compileOnly 'io.serverlessworkflow:serverlessworkflow-api'
+}

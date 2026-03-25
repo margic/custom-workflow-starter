@@ -1,0 +1,23 @@
+plugins {
+    id 'org.springframework.boot' version "${springBootVersion}"
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+    id 'com.anax.kogito-codegen'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.kie.kogito:kogito-bom:${kogitoVersion}"
+    }
+}
+
+anaxKogito {
+    metadataServerUrl = providers.environmentVariable('METADATA_SERVER_URL')
+            .orElse('http://metadata-platform:3001')
+}
+
+dependencies {
+    implementation project(':anax-kogito-spring-boot-starter')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

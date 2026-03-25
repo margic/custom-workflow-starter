@@ -6,6 +6,22 @@
 
 ---
 
+## Progress Tracker
+
+| Phase | Description | Status | Commit |
+|-------|-------------|--------|--------|
+| 0 | Repository Bootstrap | ✅ Done | `c04f9bf` |
+| 1 | Codegen Extensions Module | ✅ Done | `dce85b7` |
+| 2 | Spring Boot Starter Module | ✅ Done | `512c609` |
+| 3 | Gradle Plugin Module | ✅ Done | `19b4d5c` |
+| 4 | Sample Application | ✅ Done | `52da409` |
+| 5 | Copilot Integration & Docs | ✅ Done | *(this commit)* |
+
+**Branch:** `feature/spring-boot-starter`
+**Last updated:** 2026-03-22
+
+---
+
 > **Note on Phase 3:** Prompts 3.1–3.6 below provide a high-level overview of the Gradle plugin module. For implementation, follow the detailed [Phase 3 Specification](0007-phase3-plugin-spec.md) §8 checklist (items 3.1–3.13), which supersedes these prompts with confirmed API contracts, a `MetadataServerClient` abstraction, utility classes (`UriParser`, `SwJsonParser`), the `GenerateMcpConfigTask`, and a comprehensive test strategy.
 
 ## Overview
@@ -18,8 +34,9 @@ This document provides a step-by-step prompt sequence for scaffolding the `custo
 - Three publishable modules + one sample/integration-test module
 - No Maven support needed
 - Consumers declare zero `org.kie.kogito` dependencies — the starter manages all Kogito deps transitively
-- Build-time asset resolution from the [Metadata Management Platform](canonical-metadata-server.md) — `dmn://` and `map://` URIs are fetched at build time; missing assets fail the build
-- `map://` uses Jolt transformation specs fetched from the metadata server (Jolt engine wired in a later iteration; initial handler is a stub)
+- Governance assets (DMN models, Jolt specs) are committed to `src/main/resources/` — builds are self-contained with no external service dependencies
+- `map://` uses Jolt transformation specs committed at `src/main/resources/META-INF/anax/mappings/` (Jolt engine wired in a later iteration; initial handler is a stub)
+- Runtime registration: the starter publishes the catalog to the metadata server on application startup for observability and drift detection
 
 ---
 
@@ -29,7 +46,7 @@ Before starting, the agent should be provided with these four documents (in orde
 
 | #   | Document                                                                                       | Purpose                                                                                                                                                                                     |
 | --- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [0006-kogito-custom-uri-spring-boot-starter.md](0006-kogito-custom-uri-spring-boot-starter.md) | **Architecture** — The ADR defining what to build: module structure, two-phase execution model, URI schemes, auto-configuration design, metadata catalog                                    |
+| 1   | [0006-kogito-custom-uri-spring-boot-starter.md](0006-kogito-custom-uri-spring-boot-starter.md) | **Architecture** — The ADR defining what to build: module structure, governance asset lifecycle, URI schemes, auto-configuration design, metadata catalog, runtime registration |
 | 2   | [0006-IMPLEMENTATION-PLAN.md](0006-IMPLEMENTATION-PLAN.md)                                     | **Prompts** — This file. Step-by-step instructions for each source file                                                                                                                     |
 | 3   | [0006-POC-REFERENCE.md](0006-POC-REFERENCE.md)                                                 | **Proven code** — All 10 working POC source files from `order-routing-service`, verbatim. Use as the authoritative reference for Kogito API patterns, class structures, and parameter names |
 | 4   | [0006-README-TEMPLATE.md](0006-README-TEMPLATE.md)                                             | **Documentation** — The target README for the starter repository                                                                                                                            |
@@ -42,13 +59,13 @@ The POC reference (`0006-POC-REFERENCE.md`) contains:
 - **Workflows**: `hello-world.sw.json` (demo) and `utility-order-mapping.sw.json` (production-grade)
 - **Service stub**: `HelloService.java` (example `anax://` bean contract)
 
-**Note:** The POC does not include `MapFunctionTypeHandler` or `MapWorkItemHandler` — these are new. The `map://` scheme follows the same SPI pattern as `dmn://` and `anax://` but uses Jolt transformation specs fetched from the metadata server. See prompts 1.4 and 2.4 below.
+**Note:** The POC does not include `MapFunctionTypeHandler` or `MapWorkItemHandler` — these are new. The `map://` scheme follows the same SPI pattern as `dmn://` and `anax://` but uses Jolt transformation specs committed in the project. See prompts 1.4 and 2.4 below.
 
 ---
 
-## Phase 0: Repository Bootstrap
+## Phase 0: Repository Bootstrap ✅
 
-### Prompt 0.1 — Create the multi-module Gradle project
+### Prompt 0.1 — Create the multi-module Gradle project ✅ `c04f9bf`
 
 ```
 Create a new multi-module Gradle project at /workspaces/custom-workflow-starter with these specifications:
@@ -85,9 +102,9 @@ Do NOT add dependencies yet — those come in later prompts.
 
 ---
 
-## Phase 1: Codegen Extensions Module
+## Phase 1: Codegen Extensions Module ✅
 
-### Prompt 1.1 — Build file for codegen extensions
+### Prompt 1.1 — Build file for codegen extensions ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/build.gradle:
@@ -106,7 +123,7 @@ Import the Kogito BOM for version management:
 The jar must include the META-INF/services file so ServiceLoader discovers the handlers.
 ```
 
-### Prompt 1.2 — DmnFunctionTypeHandler
+### Prompt 1.2 — DmnFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/DmnFunctionTypeHandler.java
@@ -142,7 +159,7 @@ Use public static final constants for the parameter names:
   DMN_SCHEME = "dmn"
 ```
 
-### Prompt 1.3 — AnaxFunctionTypeHandler
+### Prompt 1.3 — AnaxFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/AnaxFunctionTypeHandler.java
@@ -166,7 +183,7 @@ Use public static final constants:
   ANAX_SCHEME = "anax"
 ```
 
-### Prompt 1.4 — MapFunctionTypeHandler
+### Prompt 1.4 — MapFunctionTypeHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/java/com/anax/kogito/codegen/MapFunctionTypeHandler.java
@@ -189,7 +206,7 @@ Use public static final constants:
   MAP_SCHEME = "map"
 ```
 
-### Prompt 1.5 — SPI registration file
+### Prompt 1.5 — SPI registration file ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-extensions/src/main/resources/META-INF/services/org.kie.kogito.serverless.workflow.parser.FunctionTypeHandler
@@ -200,7 +217,7 @@ com.anax.kogito.codegen.AnaxFunctionTypeHandler
 com.anax.kogito.codegen.MapFunctionTypeHandler
 ```
 
-### Prompt 1.6 — Verify codegen extensions compile
+### Prompt 1.6 — Verify codegen extensions compile ✅ `dce85b7`
 
 ```
 Run: gradle :anax-kogito-codegen-extensions:compileJava
@@ -209,9 +226,9 @@ Verify BUILD SUCCESSFUL with no errors.
 
 ---
 
-## Phase 2: Spring Boot Starter Module
+## Phase 2: Spring Boot Starter Module ✅
 
-### Prompt 2.1 — Build file for the starter
+### Prompt 2.1 — Build file for the starter ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/build.gradle:
@@ -237,7 +254,7 @@ Dependencies:
 This jar must NOT be a fat jar. It's consumed as a library dependency.
 ```
 
-### Prompt 2.2 — DmnWorkItemHandler
+### Prompt 2.2 — DmnWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/DmnWorkItemHandler.java
@@ -264,7 +281,7 @@ Do NOT use @Autowired — use constructor injection. The bean wiring
 happens in the auto-configuration class.
 ```
 
-### Prompt 2.3 — AnaxWorkItemHandler
+### Prompt 2.3 — AnaxWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxWorkItemHandler.java
@@ -290,7 +307,7 @@ Package: com.anax.kogito.autoconfigure
 Constructor injection, no @Autowired.
 ```
 
-### Prompt 2.4 — MapWorkItemHandler
+### Prompt 2.4 — MapWorkItemHandler ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/MapWorkItemHandler.java
@@ -311,8 +328,8 @@ Behavior:
   2. Build input map (excluding MappingName, TaskName)
   3. Load the Jolt spec from classpath:
      META-INF/anax/mappings/{mappingName}.json
-     (this file is placed there by the resolveGovernanceAssets Gradle task
-     which fetches it from the metadata server at build time)
+     (this file is committed to src/main/resources/ via Copilot + MCP tools
+     or the metadata server UI)
   4. STUB: Log a message indicating the Jolt spec was found but
      Jolt execution is not yet implemented. Return the input map
      unchanged as the output.
@@ -328,7 +345,7 @@ Package: com.anax.kogito.autoconfigure
 Constructor injection, no @Autowired.
 ```
 
-### Prompt 2.5 — Auto-configuration class
+### Prompt 2.5 — Auto-configuration class ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxKogitoAutoConfiguration.java
@@ -366,7 +383,7 @@ Import:
   - org.kie.kogito.process.impl.DefaultWorkItemHandlerConfig
 ```
 
-### Prompt 2.6 — AnaxKogitoProperties
+### Prompt 2.6 — AnaxKogitoProperties ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/autoconfigure/AnaxKogitoProperties.java
@@ -388,7 +405,7 @@ public class AnaxKogitoProperties {
 Package: com.anax.kogito.autoconfigure
 ```
 
-### Prompt 2.7 — CatalogModel
+### Prompt 2.7 — CatalogModel ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/CatalogModel.java
@@ -448,7 +465,7 @@ Java records representing the catalog.json structure:
 Package: com.anax.kogito.catalog
 ```
 
-### Prompt 2.8 — AnaxCatalogService
+### Prompt 2.8 — AnaxCatalogService ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/AnaxCatalogService.java
@@ -476,7 +493,7 @@ Package: com.anax.kogito.catalog
 Constructor injection: ObjectMapper, ApplicationContext, ResourceLoader
 ```
 
-### Prompt 2.9 — AnaxCatalogController
+### Prompt 2.9 — AnaxCatalogController ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/catalog/AnaxCatalogController.java
@@ -497,7 +514,7 @@ All endpoints return 200 with JSON. Inject AnaxCatalogService.
 Package: com.anax.kogito.catalog
 ```
 
-### Prompt 2.10 — AutoConfiguration.imports registration
+### Prompt 2.10 — AutoConfiguration.imports registration ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
@@ -506,18 +523,96 @@ Contents (single line):
 com.anax.kogito.autoconfigure.AnaxKogitoAutoConfiguration
 ```
 
-### Prompt 2.11 — Verify starter compiles
+### Prompt 2.11 — Verify starter compiles ✅ `512c609`
 
 ```
 Run: gradle :anax-kogito-spring-boot-starter:compileJava
 Verify BUILD SUCCESSFUL.
 ```
 
+### Prompt 2.12 — MetadataServerRegistrationService (NEW)
+
+```
+Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/registration/MetadataServerRegistrationService.java
+
+Service that publishes the catalog to the metadata server on application startup.
+This enables runtime observability and drift detection.
+
+Behavior:
+- Listens for ApplicationReadyEvent
+- Loads catalog from AnaxCatalogService
+- Constructs a registration payload with:
+  - Full catalog (schemes, DMN models, workflows, beans)
+  - Instance metadata: spring.application.name, version, host, port, startedAt
+- POSTs to {metadataServerUrl}/api/registrations using java.net.http.HttpClient
+- If heartbeat-interval is configured, schedules periodic re-registrations
+- All failures are logged at WARN level — never throw or prevent startup
+
+Configuration properties:
+- anax.metadata-server.url → base URL (required to enable)
+- anax.metadata-server.registration.enabled → boolean, default true
+- anax.metadata-server.registration.heartbeat-interval → Duration (optional)
+
+Auto-configuration condition:
+- @ConditionalOnProperty(prefix = "anax.metadata-server", name = "url")
+  — only active when a metadata server URL is configured
+
+Package: com.anax.kogito.registration
+Constructor injection: AnaxCatalogService, AnaxMetadataServerProperties,
+                       Environment (for app name, port, etc.)
+```
+
+### Prompt 2.13 — RegistrationPayload
+
+```
+Create /workspaces/custom-workflow-starter/anax-kogito-spring-boot-starter/src/main/java/com/anax/kogito/registration/RegistrationPayload.java
+
+Java record for the registration payload:
+
+  public record RegistrationPayload(
+      String applicationName,
+      String applicationVersion,
+      String host,
+      int port,
+      String startedAt,            // ISO-8601 timestamp
+      CatalogModel.Catalog catalog
+  ) {}
+
+Package: com.anax.kogito.registration
+```
+
+### Prompt 2.14 — AnaxMetadataServerProperties
+
+```
+Create or update AnaxKogitoProperties to add metadata-server configuration:
+
+@ConfigurationProperties(prefix = "anax")
+public class AnaxKogitoProperties {
+    private CatalogProperties catalog = new CatalogProperties();
+    private MetadataServerProperties metadataServer = new MetadataServerProperties();
+
+    public static class MetadataServerProperties {
+        private String url;                        // base URL, e.g. http://metadata-platform:3001
+        private RegistrationProperties registration = new RegistrationProperties();
+    }
+
+    public static class RegistrationProperties {
+        private boolean enabled = true;
+        private Duration heartbeatInterval;        // optional, e.g. PT60S
+    }
+}
+
+Package: com.anax.kogito.autoconfigure
+```
+```
+
 ---
 
-## Phase 3: Gradle Plugin Module
+## Phase 3: Gradle Plugin Module ✅
 
-### Prompt 3.1 — Build file for the Gradle plugin
+> **Status:** Complete. All checklist items 3.1–3.13 implemented. See [Phase 3 Specification §8](0007-phase3-plugin-spec.md) for reference.
+
+### Prompt 3.1 — Build file for the Gradle plugin ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/build.gradle:
@@ -541,7 +636,7 @@ Dependencies:
   // via a 'kogitoCodegen' configuration it creates in the consuming project
 ```
 
-### Prompt 3.2 — AnaxKogitoExtension
+### Prompt 3.2 — AnaxKogitoExtension ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/AnaxKogitoExtension.java
@@ -549,66 +644,39 @@ Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/j
 Plugin extension for configuring the Anax Kogito codegen plugin.
 
 Properties:
-  - metadataServerUrl (String) — URL of the metadata server for build-time
-    asset resolution. Defaults to METADATA_SERVER_URL environment variable
-    if not set in build.gradle. Throws clear error if neither is set.
   - kogitoVersion (String) — defaults to "10.1.0"
+
+> **Design change (March 2026):** The `metadataServerUrl` property has been
+> removed from the plugin extension. The build has no dependency on the metadata
+> server. Governance assets are committed to `src/main/resources/` and read
+> locally. Runtime registration with the metadata server is configured in the
+> Spring Boot starter via `anax.metadata-server.url` in `application.yml`.
 
 Usage in consuming build.gradle:
   anaxKogito {
-      metadataServerUrl = 'http://localhost:3001'
+      kogitoVersion = '10.1.0'  // optional, defaults to 10.1.0
   }
 
-Or via environment variable:
-  export METADATA_SERVER_URL=http://localhost:3001
-
 Package: com.anax.kogito.gradle
 ```
 
-### Prompt 3.3 — ResolveGovernanceAssetsTask
+### Prompt 3.3 — ResolveGovernanceAssetsTask ✅ *(SUPERSEDED)*
+
+> **Design change (March 2026):** This task has been superseded by the self-contained
+> build model. Governance assets (DMN models, Jolt mapping specs) are committed to
+> `src/main/resources/` by the developer (via Copilot + MCP tools) and read locally
+> at build time. There is no build-time dependency on the metadata server.
+>
+> The `ResolveGovernanceAssetsTask` code may be retained in the codebase for reference
+> but is no longer registered in the plugin's `apply()` method. The metadata server
+> connection is established at **runtime** via the starter's
+> `MetadataServerRegistrationService` (see Prompt 2.12).
 
 ```
-Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/ResolveGovernanceAssetsTask.java
-
-A Gradle DefaultTask that fetches governance assets (DMN models, Jolt mapping
-specs) from the metadata server at build time. This implements the reactive
-asset resolution model: parse local .sw.json → extract URIs → fetch → fail if missing.
-
-Inputs:
-  - src/main/resources/**/*.sw.json
-  - metadataServerUrl from AnaxKogitoExtension
-
-Outputs:
-  - build/generated/resources/kogito/ (DMN files)
-  - build/generated/resources/kogito/META-INF/anax/mappings/ (Jolt spec files)
-
-@TaskAction resolve():
-  1. Parse all .sw.json files in src/main/resources
-  2. For each functions[] entry with "type": "custom":
-     - If operation starts with "dmn://":
-       Extract {decisionId} from the URI
-       GET {metadataServerUrl}/api/decisions/{decisionId}
-       Write the DMN XML to build/generated/resources/kogito/{modelName}.dmn
-     - If operation starts with "map://":
-       Extract {mappingId} from the URI
-       GET {metadataServerUrl}/api/mappings/{mappingId}
-       Write the Jolt spec JSON to
-       build/generated/resources/kogito/META-INF/anax/mappings/{mappingName}.json
-     - If operation starts with "anax://":
-       Skip — anax:// references local Spring beans, not metadata server assets.
-  3. If ANY HTTP request returns 404 or fails:
-     throw GradleException with clear error:
-     "Asset not found on metadata server: {uri} (referenced by {sw.json file})"
-     This FAILS THE BUILD.
-  4. If dmn:// URIs were resolved, auto-add org.kie.kogito:kogito-dmn
-     to the project's 'implementation' configuration.
-
-Use java.net.http.HttpClient for HTTP requests (Java 11+ API, no external deps).
-
-Package: com.anax.kogito.gradle
+(Original prompt preserved for historical reference — see git history for details.)
 ```
 
-### Prompt 3.4 — AnaxKogitoCodegenPlugin
+### Prompt 3.4 — AnaxKogitoCodegenPlugin ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/AnaxKogitoCodegenPlugin.java
@@ -632,44 +700,41 @@ apply(Project project):
 5. Read kogitoVersion from extension or project.findProperty("kogitoVersion")
    with default "10.1.0"
 
-6. Register 'resolveGovernanceAssets' task (ResolveGovernanceAssetsTask):
-   - Reads metadataServerUrl from anaxKogito extension
-   - inputs: src/main/resources/**/*.sw.json
-   - outputs: build/generated/resources/kogito
-
-7. Register 'generateKogitoSources' task:
-   - dependsOn resolveGovernanceAssets
-   - inputs: src/main/resources/**/*.sw.json, build/generated/resources/kogito/**/*.dmn
+6. Register 'generateKogitoSources' task:
+   - inputs: src/main/resources/**/*.sw.json, src/main/resources/**/*.dmn
    - outputs: build/generated/sources/kogito, build/generated/resources/kogito
    - doLast: Build URLClassLoader from kogitoCodegen + runtimeClasspath,
      set Thread.contextClassLoader, invoke Kogito codegen reflectively
      (same logic as the POC generateKogitoSources task)
    - Uses consuming project's group, name, version for Kogito GAV
 
-8. Wire main sourceSet:
+7. Wire main sourceSet:
    - Add build/generated/sources/kogito to java srcDirs (append, don't replace)
    - Add build/generated/resources/kogito to resources srcDirs (append)
 
 9. Wire task dependencies:
    - compileJava dependsOn generateKogitoSources
    - processResources dependsOn generateKogitoSources
-   - Set duplicatesStrategy EXCLUDE on processResources
+
+> **Design change (March 2026):** The `resolveGovernanceAssets` task and
+> `metadataServerUrl` configuration have been removed. The build pipeline reads
+> governance assets (DMN, Jolt specs) directly from `src/main/resources/`.
 
 Package: com.anax.kogito.gradle
 ```
 
-### Prompt 3.5 — CatalogManifestTask
+### Prompt 3.5 — CatalogManifestTask ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-codegen-plugin/src/main/java/com/anax/kogito/gradle/CatalogManifestTask.java
 
 A Gradle DefaultTask that generates META-INF/anax/catalog.json by
-combining data from metadata server-resolved assets and local project resources.
+combining data from project resources committed in src/main/resources/.
 
 Inputs:
   - src/main/resources/**/*.sw.json
-  - build/generated/resources/kogito/**/*.dmn (resolved from metadata server)
-  - build/generated/resources/kogito/META-INF/anax/mappings/*.json (resolved Jolt specs)
+  - src/main/resources/**/*.dmn (committed governance assets)
+  - src/main/resources/META-INF/anax/mappings/*.json (committed Jolt specs)
   - src/main/java/**/*.java (for Spring bean scanning)
 
 Outputs:
@@ -679,12 +744,12 @@ Outputs:
   1. Initialize catalog with static scheme definitions for dmn://, anax://, map://
      (these are always present — they come from the codegen extensions)
 
-  2. Scan resolved DMN files (build/generated/resources/kogito/**/*.dmn):
+  2. Scan committed DMN files (src/main/resources/**/*.dmn):
      - Parse XML to extract <definitions namespace="..." name="...">
      - Extract <inputData> and <decision> names for inputs/outputs
      - Build DmnModelEntry with constructed URI: dmn://{namespace}/{name}
 
-  3. Scan resolved Jolt mapping specs (build/generated/resources/kogito/META-INF/anax/mappings/*.json):
+  3. Scan committed Jolt mapping specs (src/main/resources/META-INF/anax/mappings/*.json):
      - Extract mapping name from filename
      - Build MappingEntry with constructed URI: map://{mappingName}
 
@@ -702,8 +767,12 @@ Outputs:
 
 Register this task in the plugin's apply() method:
   - Named 'generateAnaxCatalog'
-  - dependsOn resolveGovernanceAssets and generateKogitoSources
+  - dependsOn generateKogitoSources
   - processResources dependsOn generateAnaxCatalog
+
+> **Design change (runtime registration):** DMN models and Jolt specs are now
+> committed directly to `src/main/resources/` via Copilot + MCP tools.
+> The catalog task scans committed files — no build-time server dependency.
 
 Package: com.anax.kogito.gradle
 
@@ -713,7 +782,7 @@ scan, so missing beans in the static manifest are still discoverable at
 runtime.
 ```
 
-### Prompt 3.6 — Verify plugin compiles
+### Prompt 3.6 — Verify plugin compiles ✅ `19b4d5c`
 
 ```
 Run: gradle :anax-kogito-codegen-plugin:compileJava
@@ -722,9 +791,9 @@ Verify BUILD SUCCESSFUL.
 
 ---
 
-## Phase 4: Sample Application
+## Phase 4: Sample Application ✅
 
-### Prompt 4.1 — Sample build file
+### Prompt 4.1 — Sample build file ✅
 
 ```
 In /workspaces/custom-workflow-starter/anax-kogito-sample/build.gradle:
@@ -755,7 +824,7 @@ add to settings.gradle:
 Or use composite builds. The prompt for settings.gradle should handle this.
 ```
 
-### Prompt 4.2 — Sample application class
+### Prompt 4.2 — Sample application class ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/java/com/example/demo/DemoApplication.java
@@ -775,7 +844,7 @@ public class GreetingService {
 }
 ```
 
-### Prompt 4.3 — Sample workflow
+### Prompt 4.3 — Sample workflow ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/resources/hello-world.sw.json
@@ -789,13 +858,13 @@ A simple Serverless Workflow (specVersion 0.8) with:
     1. "Greet" — calls greetFunction with arguments { "name": "${ .name }" }
     2. "LogResult" — logs "${ .greeting }" via sysout, then ends
 
-Also note: to test the dmn:// scheme, the order-type-routing DMN model
-must exist on the metadata server. The resolveGovernanceAssets task will
-fetch it at build time. The hello-world.sw.json is sufficient for a
-minimal demo without the metadata server (it only uses anax://).
+Also note: to test the dmn:// scheme, the DMN model must be committed
+to src/main/resources/. Governance assets are authored via Copilot + MCP
+tools or the metadata server UI and committed to git. The hello-world.sw.json
+is sufficient for a minimal demo without any DMN models (it only uses anax://).
 ```
 
-### Prompt 4.4 — Sample application.yml
+### Prompt 4.4 — Sample application.yml ✅
 
 ```
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/src/main/resources/application.yml
@@ -815,7 +884,7 @@ kogito:
     version-strategy: workflow
 ```
 
-### Prompt 4.5 — Build and run the sample
+### Prompt 4.5 — Build and run the sample ✅ `52da409`
 
 ```
 Run:
@@ -838,9 +907,9 @@ the hello-world workflow, and the greetingService bean.
 
 ---
 
-## Phase 5: Copilot Integration & Documentation
+## Phase 5: Copilot Integration & Documentation ✅
 
-### Prompt 5.1 — Copilot instructions template
+### Prompt 5.1 — Copilot instructions template ✅
 
 ````
 Create /workspaces/custom-workflow-starter/anax-kogito-sample/.github/copilot-instructions.md
@@ -892,7 +961,7 @@ At runtime, query `GET /anax/catalog` for the full inventory of:
 
 ```
 
-### Prompt 5.2 — README.md
+### Prompt 5.2 — README.md ✅
 
 ```
 

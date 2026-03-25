@@ -1,0 +1,38 @@
+plugins {
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+        mavenBom "org.kie.kogito:kogito-bom:${kogitoVersion}"
+    }
+}
+
+dependencies {
+    api 'org.kie.kogito:kogito-api'
+    api 'org.kie.kogito:jbpm-flow'
+    api 'org.kie.kogito:jbpm-flow-builder'
+    api 'org.kie.kogito:process-workitems'
+    api 'org.kie.kogito:kogito-serverless-workflow-builder'
+
+    // Annotations used by Kogito-generated REST resources
+    api 'io.swagger.core.v3:swagger-annotations:2.2.20'
+    api 'org.eclipse.microprofile.openapi:microprofile-openapi-api:3.1.1'
+    api 'jakarta.validation:jakarta.validation-api'
+
+    // Spring Boot process runtime auto-configuration
+    implementation 'org.jbpm:jbpm-spring-boot-starter'
+
+    // DMN decisions runtime auto-configuration
+    api 'org.drools:drools-decisions-spring-boot-starter'
+
+    api 'org.kie.kogito:kogito-dmn'
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
+    compileOnly 'org.springframework:spring-context'
+    compileOnly 'org.springframework:spring-web'
+    compileOnly 'com.fasterxml.jackson.core:jackson-databind'
+    compileOnly 'jakarta.annotation:jakarta.annotation-api'
+
+    annotationProcessor 'org.springframework.boot:spring-boot-autoconfigure-processor'
+}

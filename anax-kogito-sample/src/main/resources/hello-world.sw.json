@@ -1,0 +1,69 @@
+{
+    "id": "hello-world",
+    "version": "1.0",
+    "specVersion": "0.8",
+    "name": "Hello World Workflow",
+    "description": "Demo workflow using anax://, dmn://, and sysout custom functions",
+    "start": "GetCurrentMinute",
+    "functions": [
+        {
+            "name": "getCurrentMinuteFunction",
+            "type": "custom",
+            "operation": "anax://greetingService/getCurrentMinute"
+        },
+        {
+            "name": "greetingDecisionFunction",
+            "type": "custom",
+            "operation": "dmn://com.example.decisions/Greeting Decision"
+        },
+        {
+            "name": "logFunction",
+            "type": "custom",
+            "operation": "sysout"
+        }
+    ],
+    "states": [
+        {
+            "name": "GetCurrentMinute",
+            "type": "operation",
+            "actions": [
+                {
+                    "functionRef": {
+                        "refName": "getCurrentMinuteFunction"
+                    }
+                }
+            ],
+            "transition": "EvaluateGreeting"
+        },
+        {
+            "name": "EvaluateGreeting",
+            "type": "operation",
+            "actions": [
+                {
+                    "functionRef": {
+                        "refName": "greetingDecisionFunction",
+                        "arguments": {
+                            "currentMinute": "${ .currentMinute }"
+                        }
+                    }
+                }
+            ],
+            "transition": "LogResult"
+        },
+        {
+            "name": "LogResult",
+            "type": "operation",
+            "actions": [
+                {
+                    "functionRef": {
+                        "refName": "logFunction",
+                        "arguments": {
+                            "message": "${ .greeting }"
+                        }
+                    }
+                }
+            ],
+            "end": true
+        }
+    ]
+}

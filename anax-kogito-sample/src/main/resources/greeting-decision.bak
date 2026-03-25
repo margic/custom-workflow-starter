@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             xmlns:feel="https://www.omg.org/spec/DMN/20191111/FEEL/"
+             id="greeting-decision-definitions"
+             name="Greeting Decision"
+             namespace="com.example.decisions"
+             expressionLanguage="https://www.omg.org/spec/DMN/20191111/FEEL/"
+             typeLanguage="https://www.omg.org/spec/DMN/20191111/FEEL/">
+
+  <inputData id="input_currentMinute" name="currentMinute">
+    <variable id="var_currentMinute" name="currentMinute" typeRef="number"/>
+  </inputData>
+
+  <decision id="decision_greeting" name="greeting">
+    <variable id="var_greeting" name="greeting" typeRef="string"/>
+    <informationRequirement id="ir_currentMinute">
+      <requiredInput href="#input_currentMinute"/>
+    </informationRequirement>
+    <decisionTable id="dt_greeting" hitPolicy="FIRST" outputLabel="greeting">
+      <input id="dt_input_currentMinute" label="currentMinute">
+        <inputExpression id="ie_currentMinute" typeRef="number">
+          <text>modulo(currentMinute, 2)</text>
+        </inputExpression>
+      </input>
+      <output id="dt_output_greeting" label="greeting" typeRef="string"/>
+      <rule id="rule_even">
+        <inputEntry id="ie_even">
+          <text>0</text>
+        </inputEntry>
+        <outputEntry id="oe_even">
+          <text>"Hello, it's even!"</text>
+        </outputEntry>
+      </rule>
+      <rule id="rule_odd">
+        <inputEntry id="ie_odd">
+          <text>1</text>
+        </inputEntry>
+        <outputEntry id="oe_odd">
+          <text>"Hello, it's odd!"</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+
+</definitions>

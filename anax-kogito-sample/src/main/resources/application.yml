@@ -11,3 +11,7 @@ spring:
 kogito:
   workflow:
     version-strategy: workflow
+
+anax:
+  metadata-server:
+    url: ${METADATA_SERVER_URL:http://metadata-platform:3001}

@@ -7,15 +7,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-@Service
 public class AnaxCatalogService {
 
     private static final Logger log = LoggerFactory.getLogger(AnaxCatalogService.class);
@@ -46,26 +48,52 @@ public class AnaxCatalogService {
     }
 
     public List<CatalogModel.SchemeEntry> getSchemes() {
-        return catalog.schemes();
+        return defaultSchemes();
     }
 
     public List<CatalogModel.DmnModelEntry> getDmnModels() {
-        return catalog.dmnModels();
+        return catalog.assets().stream()
+                .filter(asset -> "decision".equals(asset.assetType()))
+                .map(this::toDmnModelEntry)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     public List<CatalogModel.WorkflowEntry> getWorkflows() {
-        return catalog.workflows();
+        return catalog.assets().stream()
+                .filter(asset -> "workflow".equals(asset.assetType()))
+                .map(asset -> new CatalogModel.WorkflowEntry(
+                        asset.assetId(),
+                        asset.assetId(),
+                        null,
+                        List.of(),
+                        List.of()))
+                .toList();
     }
 
     public List<CatalogModel.SpringBeanEntry> getSpringBeans() {
-        return catalog.springBeans();
+        return catalog.assets().stream()
+                .filter(asset -> "function".equals(asset.assetType()))
+                .map(this::toFunctionDescriptor)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        FunctionDescriptor::beanName,
+                        Collectors.collectingAndThen(Collectors.toList(), this::toSpringBeanEntry)))
+                .values().stream()
+                .sorted(Comparator.comparing(CatalogModel.SpringBeanEntry::beanName))
+                .toList();
     }
 
     private CatalogModel.Catalog loadCatalog() {
         Resource resource = resourceLoader.getResource(CATALOG_PATH);
         if (resource.exists()) {
             try {
-                return objectMapper.readValue(resource.getInputStream(), CatalogModel.Catalog.class);
+                CatalogModel.Catalog loaded = objectMapper.readValue(resource.getInputStream(),
+                        CatalogModel.Catalog.class);
+                if (loaded == null || loaded.assets() == null) {
+                    return buildDefaultCatalog();
+                }
+                return loaded;
             } catch (IOException e) {
                 log.warn("Failed to read catalog.json, using default scheme definitions", e);
             }
@@ -74,7 +102,11 @@ public class AnaxCatalogService {
     }
 
     private CatalogModel.Catalog buildDefaultCatalog() {
-        List<CatalogModel.SchemeEntry> schemes = List.of(
+        return new CatalogModel.Catalog("2.0", null, List.of());
+    }
+
+    private List<CatalogModel.SchemeEntry> defaultSchemes() {
+        return List.of(
                 new CatalogModel.SchemeEntry("dmn", "Evaluate a DMN decision model in-process",
                         "dmn://{namespace}/{modelName}",
                         List.of(
@@ -93,27 +125,29 @@ public class AnaxCatalogService {
                         List.of(
                                 new CatalogModel.ParameterEntry("MappingName", "Jolt mapping spec name", "uri")),
                         "MapWorkItemHandler"));
-        return new CatalogModel.Catalog("1.0", null, schemes,
-                List.of(), List.of(), List.of(), List.of());
     }
 
     private CatalogModel.Catalog augmentWithLiveBeans(CatalogModel.Catalog base) {
-        List<CatalogModel.SpringBeanEntry> beans = new ArrayList<>(base.springBeans());
-        List<String> existingNames = beans.stream()
-                .map(CatalogModel.SpringBeanEntry::beanName)
-                .toList();
+        List<CatalogModel.AssetEntry> assets = new ArrayList<>(base.assets());
+        Set<String> existingUris = assets.stream()
+                .filter(asset -> "function".equals(asset.assetType()))
+                .map(CatalogModel.AssetEntry::uri)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
 
         for (String name : applicationContext.getBeanDefinitionNames()) {
-            if (existingNames.contains(name)) {
-                continue;
-            }
             try {
                 Object bean = applicationContext.getBean(name);
                 List<CatalogModel.MethodEntry> anaxMethods = findAnaxMethods(bean);
-                if (!anaxMethods.isEmpty()) {
-                    beans.add(new CatalogModel.SpringBeanEntry(
-                            name, bean.getClass().getName(), anaxMethods,
-                            "anax://" + name));
+                for (CatalogModel.MethodEntry method : anaxMethods) {
+                    String uri = "anax://" + name + "/" + method.name();
+                    if (existingUris.add(uri)) {
+                        assets.add(new CatalogModel.AssetEntry(
+                                uri,
+                                name + "/" + method.name(),
+                                "function",
+                                null,
+                                null));
+                    }
                 }
             } catch (Exception e) {
                 // Skip beans that can't be instantiated eagerly
@@ -121,8 +155,7 @@ public class AnaxCatalogService {
         }
 
         return new CatalogModel.Catalog(
-                base.schemaVersion(), base.generatedAt(), base.schemes(),
-                base.dmnModels(), base.workflows(), beans, base.formSchemas());
+                base.schemaVersion(), base.generatedAt(), assets);
     }
 
     private List<CatalogModel.MethodEntry> findAnaxMethods(Object bean) {
@@ -136,5 +169,44 @@ public class AnaxCatalogService {
             }
         }
         return result;
+    }
+
+    private CatalogModel.DmnModelEntry toDmnModelEntry(CatalogModel.AssetEntry asset) {
+        String uri = asset.uri();
+        if (uri == null || !uri.startsWith("dmn://")) {
+            return null;
+        }
+        String remainder = uri.substring("dmn://".length());
+        int slash = remainder.lastIndexOf('/');
+        if (slash <= 0) {
+            return null;
+        }
+        String namespace = remainder.substring(0, slash);
+        String name = remainder.substring(slash + 1);
+        return new CatalogModel.DmnModelEntry(namespace, name, uri, null, List.of(), List.of());
+    }
+
+    private FunctionDescriptor toFunctionDescriptor(CatalogModel.AssetEntry asset) {
+        String uri = asset.uri();
+        if (uri == null || !uri.startsWith("anax://")) {
+            return null;
+        }
+        String remainder = uri.substring("anax://".length());
+        int slash = remainder.indexOf('/');
+        String beanName = slash >= 0 ? remainder.substring(0, slash) : remainder;
+        String methodName = slash >= 0 ? remainder.substring(slash + 1) : "execute";
+        return new FunctionDescriptor(beanName, methodName, uri);
+    }
+
+    private CatalogModel.SpringBeanEntry toSpringBeanEntry(List<FunctionDescriptor> functions) {
+        FunctionDescriptor first = functions.get(0);
+        List<CatalogModel.MethodEntry> methods = functions.stream()
+                .map(fn -> new CatalogModel.MethodEntry(fn.methodName(), "Map<String, Object>", "Map<String, Object>"))
+                .sorted(Comparator.comparing(CatalogModel.MethodEntry::name))
+                .toList();
+        return new CatalogModel.SpringBeanEntry(first.beanName(), null, methods, "anax://" + first.beanName());
+    }
+
+    private record FunctionDescriptor(String beanName, String methodName, String uri) {
     }
 }

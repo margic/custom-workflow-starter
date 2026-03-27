@@ -1,6 +1,5 @@
 package com.anax.kogito.catalog;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -9,7 +8,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/anax/catalog")
-@ConditionalOnProperty(prefix = "anax.catalog", name = "enabled", matchIfMissing = true)
 public class AnaxCatalogController {
 
     private final AnaxCatalogService catalogService;

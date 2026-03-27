@@ -9,7 +9,7 @@ services:
       - redpanda
 
   metadata-platform:
-    image: ghcr.io/margic/codespaces-react:sha-a8ea932
+    image: ghcr.io/margic/codespaces-react:sha-52874ad
     ports:
       - "3001:3001"
 
@@ -26,10 +26,18 @@ services:
       - --overprovisioned
       - --default-log-level=warn
     ports:
-      - "19092:19092"  # Kafka API (external/host)
-      - "18081:18081"  # Schema Registry
+      - "19092:19092" # Kafka API (external/host)
+      - "18081:18081" # Schema Registry
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "http://localhost:9644"]
+      test:
+        [
+          "CMD",
+          "rpk",
+          "cluster",
+          "health",
+          "--api-urls",
+          "http://localhost:9644",
+        ]
       start_period: 30s
       interval: 10s
       timeout: 5s

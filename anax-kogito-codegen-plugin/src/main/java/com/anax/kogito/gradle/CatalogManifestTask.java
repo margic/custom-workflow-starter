@@ -12,10 +12,17 @@ import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 
 import java.io.IOException;
+import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Generates META-INF/anax/catalog.json from resolved assets and workflow
@@ -29,6 +36,9 @@ import java.util.List;
  */
 public abstract class CatalogManifestTask extends DefaultTask {
 
+    private static final Pattern DMN_NAME = Pattern.compile("<definitions[^>]+name\\s*=\\s*\"([^\"]+)\"");
+    private static final Pattern DMN_NAMESPACE = Pattern.compile("<definitions[^>]+namespace\\s*=\\s*\"([^\"]+)\"");
+
     @Input
     public abstract Property<String> getResourceDir();
 
@@ -39,28 +49,14 @@ public abstract class CatalogManifestTask extends DefaultTask {
     public void generate() throws IOException {
         Path resourcePath = Path.of(getResourceDir().get());
         Path outputPath = getOutputDir().get().getAsFile().toPath();
+        Instant generatedAt = Instant.now();
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
         JsonObject catalog = new JsonObject();
 
-        catalog.addProperty("schemaVersion", "1.0");
-        catalog.addProperty("generatedAt", Instant.now().toString());
-
-        // Scheme definitions
-        catalog.add("schemes", buildSchemeDefinitions());
-
-        // DMN models from resolved assets
-        catalog.add("dmnModels", scanDmnModels(outputPath));
-
-        // Workflows from .sw.json files
-        catalog.add("workflows", scanWorkflows(resourcePath));
-
-        // Spring beans (static placeholder — augmented at runtime by
-        // AnaxCatalogService)
-        catalog.add("springBeans", new JsonArray());
-
-        // Form schemas (placeholder for future)
-        catalog.add("formSchemas", new JsonArray());
+        catalog.addProperty("schemaVersion", "2.0");
+        catalog.addProperty("generatedAt", generatedAt.toString());
+        catalog.add("assets", buildAssets(resourcePath, outputPath, generatedAt.toString()));
 
         Path catalogFile = outputPath.resolve("META-INF/anax/catalog.json");
         Files.createDirectories(catalogFile.getParent());
@@ -68,73 +64,50 @@ public abstract class CatalogManifestTask extends DefaultTask {
         getLogger().lifecycle("Generated {}", catalogFile);
     }
 
-    private JsonArray buildSchemeDefinitions() {
-        JsonArray schemes = new JsonArray();
+    private JsonArray buildAssets(Path resourceDir, Path outputDir, String resolvedAt) {
+        Map<String, JsonObject> assets = new LinkedHashMap<>();
+        scanDmnModels(resourceDir, assets, resolvedAt);
+        scanDmnModels(outputDir, assets, resolvedAt);
+        scanWorkflows(resourceDir, outputDir, assets, resolvedAt);
 
-        schemes.add(buildScheme("dmn", "Evaluate a DMN decision model in-process",
-                "dmn://{namespace}/{modelName}", "DmnWorkItemHandler",
-                new String[] { "DmnNamespace", "DMN model namespace", "uri" },
-                new String[] { "ModelName", "DMN model name", "uri" }));
-
-        schemes.add(buildScheme("anax", "Invoke a Spring bean method",
-                "anax://{beanName}/{methodName}", "AnaxWorkItemHandler",
-                new String[] { "BeanName", "Spring bean name", "uri" },
-                new String[] { "MethodName", "Method to invoke (default: execute)", "uri" }));
-
-        schemes.add(buildScheme("map", "Apply a Jolt data transformation",
-                "map://{mappingName}", "MapWorkItemHandler",
-                new String[] { "MappingName", "Jolt mapping spec name", "uri" }));
-
-        return schemes;
+        JsonArray array = new JsonArray();
+        assets.values().forEach(array::add);
+        return array;
     }
 
-    private JsonObject buildScheme(String scheme, String description, String uriPattern,
-            String handler, String[]... params) {
-        JsonObject obj = new JsonObject();
-        obj.addProperty("scheme", scheme);
-        obj.addProperty("description", description);
-        obj.addProperty("uriPattern", uriPattern);
-        obj.addProperty("handler", handler);
-
-        JsonArray parameters = new JsonArray();
-        for (String[] p : params) {
-            JsonObject param = new JsonObject();
-            param.addProperty("name", p[0]);
-            param.addProperty("description", p[1]);
-            param.addProperty("source", p[2]);
-            parameters.add(param);
+    private void scanDmnModels(Path dir, Map<String, JsonObject> assets, String resolvedAt) {
+        if (!Files.isDirectory(dir)) {
+            return;
         }
-        obj.add("parameters", parameters);
-        return obj;
-    }
-
-    private JsonArray scanDmnModels(Path outputDir) {
-        JsonArray models = new JsonArray();
-        Path kogitoDir = outputDir;
-        if (!Files.isDirectory(kogitoDir)) {
-            return models;
-        }
-        try (var files = Files.list(kogitoDir)) {
-            files.filter(p -> p.toString().endsWith(".dmn")).forEach(p -> {
-                JsonObject model = new JsonObject();
-                String filename = p.getFileName().toString();
-                model.addProperty("name", filename.replace(".dmn", ""));
-                model.addProperty("resource", filename);
-                model.addProperty("uri", "dmn://" + filename.replace(".dmn", ""));
-                model.add("inputs", new JsonArray());
-                model.add("outputs", new JsonArray());
-                models.add(model);
+        try (var files = Files.walk(dir, FileVisitOption.FOLLOW_LINKS)) {
+            files.filter(path -> path.toString().endsWith(".dmn")).forEach(path -> {
+                try {
+                    String content = Files.readString(path);
+                    String name = extractFirst(content, DMN_NAME);
+                    String namespace = extractFirst(content, DMN_NAMESPACE);
+                    if (name == null || namespace == null) {
+                        getLogger().warn("Skipping DMN file without <definitions name|namespace>: {}", path);
+                        return;
+                    }
+                    String uri = "dmn://" + namespace + "/" + name;
+                    assets.put(assetKey("decision", uri), buildAsset(
+                            uri,
+                            slugify(name),
+                            "decision",
+                            sha256(path),
+                            resolvedAt));
+                } catch (IOException e) {
+                    getLogger().warn("Failed to read DMN model {}", path, e);
+                }
             });
         } catch (IOException e) {
-            getLogger().warn("Failed to scan DMN models in {}", kogitoDir);
+            getLogger().warn("Failed to scan DMN models in {}", dir, e);
         }
-        return models;
     }
 
-    private JsonArray scanWorkflows(Path resourceDir) {
-        JsonArray workflows = new JsonArray();
+    private void scanWorkflows(Path resourceDir, Path outputDir, Map<String, JsonObject> assets, String resolvedAt) {
         if (!Files.isDirectory(resourceDir)) {
-            return workflows;
+            return;
         }
         try (var files = Files.walk(resourceDir)) {
             files.filter(p -> p.toString().endsWith(".sw.json")).forEach(p -> {
@@ -143,41 +116,28 @@ public abstract class CatalogManifestTask extends DefaultTask {
                     Gson gson = new Gson();
                     com.google.gson.JsonObject root = gson.fromJson(content, com.google.gson.JsonObject.class);
 
-                    JsonObject wf = new JsonObject();
-                    wf.addProperty("id", getJsonString(root, "id"));
-                    wf.addProperty("name", getJsonString(root, "name"));
-                    wf.addProperty("resource", resourceDir.relativize(p).toString());
+                    String workflowId = getJsonString(root, "id");
+                    if (workflowId != null && !workflowId.isBlank()) {
+                        String workflowUri = "workflow://" + workflowId;
+                        assets.put(assetKey("workflow", workflowUri), buildAsset(
+                                workflowUri,
+                                workflowId,
+                                "workflow",
+                                sha256(p),
+                                resolvedAt));
+                    }
 
-                    // Functions
-                    JsonArray functions = new JsonArray();
                     com.google.gson.JsonArray fns = root.getAsJsonArray("functions");
                     if (fns != null) {
                         for (var el : fns) {
-                            JsonObject fn = new JsonObject();
                             com.google.gson.JsonObject fnObj = el.getAsJsonObject();
-                            fn.addProperty("name", getJsonString(fnObj, "name"));
-                            fn.addProperty("operation", getJsonString(fnObj, "operation"));
-                            functions.add(fn);
+                            String operation = getJsonString(fnObj, "operation");
+                            if (operation == null || operation.isBlank()) {
+                                continue;
+                            }
+                            addFunctionAsset(operation, outputDir, resourceDir, assets, resolvedAt);
                         }
                     }
-                    wf.add("functions", functions);
-
-                    // Events
-                    JsonArray events = new JsonArray();
-                    com.google.gson.JsonArray evts = root.getAsJsonArray("events");
-                    if (evts != null) {
-                        for (var el : evts) {
-                            JsonObject evt = new JsonObject();
-                            com.google.gson.JsonObject evtObj = el.getAsJsonObject();
-                            evt.addProperty("name", getJsonString(evtObj, "name"));
-                            evt.addProperty("type", getJsonString(evtObj, "type"));
-                            evt.addProperty("kind", getJsonString(evtObj, "kind"));
-                            events.add(evt);
-                        }
-                    }
-                    wf.add("events", events);
-
-                    workflows.add(wf);
                 } catch (IOException e) {
                     getLogger().warn("Failed to read workflow file: {}", p);
                 }
@@ -185,11 +145,144 @@ public abstract class CatalogManifestTask extends DefaultTask {
         } catch (IOException e) {
             getLogger().warn("Failed to scan workflows in {}", resourceDir);
         }
-        return workflows;
     }
 
     private String getJsonString(com.google.gson.JsonObject obj, String key) {
         var el = obj.get(key);
         return (el != null && !el.isJsonNull()) ? el.getAsString() : null;
+    }
+
+    private void addFunctionAsset(String operation, Path outputDir, Path resourceDir,
+            Map<String, JsonObject> assets, String resolvedAt) {
+        try {
+            UriParser.ParsedUri parsed = UriParser.parse(operation);
+            switch (parsed.scheme()) {
+                case "dmn" -> assets.put(assetKey("decision", operation), buildAsset(
+                        operation,
+                        slugify(parsed.secondary()),
+                        "decision",
+                        resolveDmnChecksum(parsed, outputDir, resourceDir),
+                        resolvedAt));
+                case "map" -> assets.put(assetKey("mapping", operation), buildAsset(
+                        operation,
+                        parsed.primary(),
+                        "mapping",
+                        resolveMappingChecksum(parsed.primary(), outputDir, resourceDir),
+                        resolvedAt));
+                case "anax" -> assets.put(assetKey("function", operation), buildAsset(
+                        operation,
+                        parsed.primary() + "/" + parsed.secondary(),
+                        "function",
+                        null,
+                        null));
+                default -> {
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            getLogger().warn("Skipping unrecognized custom operation in catalog generation: {}", operation);
+        }
+    }
+
+    private String resolveDmnChecksum(UriParser.ParsedUri parsed, Path outputDir, Path resourceDir) {
+        Path outputMatch = findDmnByName(outputDir, parsed.secondary());
+        if (outputMatch != null) {
+            return sha256(outputMatch);
+        }
+        Path resourceMatch = findDmnByName(resourceDir, parsed.secondary());
+        if (resourceMatch != null) {
+            return sha256(resourceMatch);
+        }
+        getLogger().warn("No DMN file found for {} while generating catalog checksum", parsed);
+        return null;
+    }
+
+    private String resolveMappingChecksum(String mappingName, Path outputDir, Path resourceDir) {
+        Path outputFile = outputDir.resolve("META-INF/anax/mappings/" + mappingName + ".json");
+        if (Files.exists(outputFile)) {
+            return sha256(outputFile);
+        }
+        Path resourceFile = resourceDir.resolve("META-INF/anax/mappings/" + mappingName + ".json");
+        if (Files.exists(resourceFile)) {
+            return sha256(resourceFile);
+        }
+        getLogger().warn("No mapping file found for map://{} while generating catalog checksum", mappingName);
+        return null;
+    }
+
+    private Path findDmnByName(Path dir, String modelName) {
+        if (!Files.isDirectory(dir)) {
+            return null;
+        }
+        try (var files = Files.walk(dir, FileVisitOption.FOLLOW_LINKS)) {
+            return files
+                    .filter(path -> path.toString().endsWith(".dmn"))
+                    .filter(path -> hasDmnName(path, modelName))
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException e) {
+            getLogger().warn("Failed to scan DMN files in {}", dir, e);
+            return null;
+        }
+    }
+
+    private boolean hasDmnName(Path path, String expectedName) {
+        try {
+            String content = Files.readString(path);
+            String actualName = extractFirst(content, DMN_NAME);
+            return expectedName.equals(actualName);
+        } catch (IOException e) {
+            getLogger().warn("Failed to read DMN model {}", path, e);
+            return false;
+        }
+    }
+
+    private JsonObject buildAsset(String uri, String assetId, String assetType, String checksum, String resolvedAt) {
+        JsonObject asset = new JsonObject();
+        asset.addProperty("uri", uri);
+        asset.addProperty("assetId", assetId);
+        asset.addProperty("assetType", assetType);
+        if (checksum == null) {
+            asset.add("checksum", null);
+        } else {
+            asset.addProperty("checksum", checksum);
+        }
+        if (resolvedAt == null) {
+            asset.add("resolvedAt", null);
+        } else {
+            asset.addProperty("resolvedAt", resolvedAt);
+        }
+        return asset;
+    }
+
+    private String assetKey(String assetType, String uri) {
+        return assetType + ":" + uri;
+    }
+
+    private String extractFirst(String content, Pattern pattern) {
+        Matcher matcher = pattern.matcher(content);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private String slugify(String value) {
+        return value.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+    }
+
+    private String sha256(Path path) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = Files.readAllBytes(path);
+            byte[] hash = digest.digest(bytes);
+            StringBuilder result = new StringBuilder("sha256:");
+            for (byte b : hash) {
+                result.append(String.format("%02x", b));
+            }
+            return result.toString();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read file for checksum: " + path, e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 }

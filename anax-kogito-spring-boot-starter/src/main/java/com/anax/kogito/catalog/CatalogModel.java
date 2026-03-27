@@ -1,5 +1,7 @@
 package com.anax.kogito.catalog;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.List;
 
 public final class CatalogModel {
@@ -7,14 +9,20 @@ public final class CatalogModel {
         private CatalogModel() {
         }
 
+        @JsonIgnoreProperties(ignoreUnknown = true)
         public record Catalog(
                         String schemaVersion,
                         String generatedAt,
-                        List<SchemeEntry> schemes,
-                        List<DmnModelEntry> dmnModels,
-                        List<WorkflowEntry> workflows,
-                        List<SpringBeanEntry> springBeans,
-                        List<FormSchemaEntry> formSchemas) {
+                        List<AssetEntry> assets) {
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public record AssetEntry(
+                        String uri,
+                        String assetId,
+                        String assetType,
+                        String checksum,
+                        String resolvedAt) {
         }
 
         public record SchemeEntry(
@@ -51,9 +59,5 @@ public final class CatalogModel {
 
         public record MethodEntry(
                         String name, String parameterType, String returnType) {
-        }
-
-        public record FormSchemaEntry(
-                        String formId, String title, String source, List<String> fields) {
         }
 }

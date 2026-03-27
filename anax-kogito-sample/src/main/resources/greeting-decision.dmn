@@ -30,7 +30,7 @@
           <text>0</text>
         </inputEntry>
         <outputEntry id="oe_even">
-          <text>"Hello, it's even!"</text>
+          <text>"Hello, it's modified even!"</text>
         </outputEntry>
       </rule>
       <rule id="rule_odd">
